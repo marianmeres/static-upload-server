@@ -9,7 +9,7 @@
     "dev": "deno run --watch -A example/main.ts",
     "example": "deno run --env=.env.example -A example/main.ts",
     "test": "deno test -A",
-    "release": "deno run -A jsr:@marianmeres/deno-release",
+    "release": "deno run -A jsr:@marianmeres/release",
     "publish": "deno publish",
     "rp": "deno task release -y && deno task publish",
     "rpm": "deno task release minor -y && deno task publish",
