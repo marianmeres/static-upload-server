@@ -1,0 +1,9 @@
+# The Dockerfile copies only the manifest, the lockfile and src/. Everything else stays
+# out of the build context, local secrets and stored files first.
+.env
+data/
+config/
+tmp/
+node_modules/
+dist/
+.git/

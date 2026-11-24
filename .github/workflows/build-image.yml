@@ -1,0 +1,164 @@
+# Builds the server's Docker image for a release and pushes it to the GitHub Container
+# Registry, so the deploy host only pulls it (`deploy.sh`) and never builds.
+#
+# Runs on a pushed vX.Y.Z tag, which is what `pnpm run rp` / `rpm` push. It can also be
+# started from the Actions tab: pick a tag as the ref to rebuild that release (only tags
+# that contain this file). From a branch it pushes `<branch>-<sha>`, never a version.
+#
+# The image is ghcr.io/<owner>/<repo>:<tag>, derived from the repository, so a fork pushes
+# to its own package with nothing to edit. There is no `latest`: a deploy always names the
+# release it runs.
+#
+# Order: the repository's own gate (`pnpm run ci`), then the image is built, started and
+# asked for its version, and only an image that passed that is pushed.
+name: Build and push image
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+
+concurrency:
+  # Two runs for the same tag must not race to the same image tag.
+  group: build-image-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (tag, pnpm run ci)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # The image reports package.json's version (`GET /`), and the deploy script checks
+      # it against the tag it deployed. A tag cut without the bump would ship an image
+      # that fails that check on the host, so it fails here first.
+      - name: Check the tag matches package.json
+        if: github.ref_type == 'tag'
+        run: |
+          declared="$(jq -r .version package.json)"
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$declared" != "$tagged" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, but package.json says version '$declared'"
+            exit 1
+          fi
+          echo "version $declared matches $GITHUB_REF_NAME"
+
+      # pnpm at the version in package.json's `packageManager`
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # typecheck, lint, the test suite, and the npm package smoke test
+      - run: pnpm run ci
+
+  image:
+    name: build, test and push the image
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the image name and tag
+        id: meta
+        run: |
+          # registry paths must be lowercase
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME//\//-}-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Built into the runner's Docker (`load`), not pushed: the step below tests this
+      # exact image, and the push after it uploads the same one.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # The deploy host is x86_64, and so is this runner: a native build. Change it
+          # (and expect a slower, emulated build) to deploy to arm64.
+          platforms: linux/amd64
+          load: true
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          # `source` connects the package to this repository; the other two say which
+          # release and which commit an image on the host came from.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          # Layer cache across runs; `mode=max` keeps the dependency install layer too.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - name: Start the image and check it serves its version
+        env:
+          REF: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+        run: |
+          expected="$(jq -r .version package.json)"
+          docker run -d --name smoke "$REF" >/dev/null
+          # the image's HEALTHCHECK, which the deploy script's `up --wait` also waits for
+          for _ in $(seq 1 30); do
+            status="$(docker inspect -f '{{.State.Status}}/{{.State.Health.Status}}' smoke)"
+            case "$status" in
+              running/healthy) break ;;
+              running/starting) sleep 1 ;;
+              *) break ;;
+            esac
+          done
+          if [ "$status" != "running/healthy" ]; then
+            echo "::error::the container is $status, not running/healthy"
+            docker logs smoke
+            exit 1
+          fi
+          version="$(docker exec smoke node -e \
+            "fetch('http://127.0.0.1:8000/').then((r)=>r.json()).then((j)=>console.log(j.version))")"
+          if [ "$version" != "$expected" ]; then
+            echo "::error::the server reports version '$version', package.json says '$expected'"
+            docker logs smoke
+            exit 1
+          fi
+          echo "the image is healthy and reports version $version"
+          docker rm -f smoke >/dev/null
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        env:
+          REF: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+        run: docker push "$REF"
+
+      - name: Summary
+        env:
+          REF: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          {
+            echo "### Image pushed"
+            echo
+            echo '```'
+            echo "$REF"
+            echo '```'
+            echo
+            echo "Deploy it on the host, in the deployed clone:"
+            echo '```'
+            echo "bash deploy.sh $TAG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

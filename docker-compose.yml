@@ -1,6 +1,10 @@
+# Runs a released image: built by .github/workflows/build-image.yml on a vX.Y.Z tag,
+# pulled by deploy.sh, which also writes the tag it deployed into `.env` as
+# APP_IMAGE_TAG. A plain `docker compose up -d` here then keeps running that release.
+# Without it the tag is `dev`: a local build (docker-compose.build.yml), never a release.
 services:
   upload-server:
-    build: .
+    image: "${APP_IMAGE:-ghcr.io/marianmeres/static-upload-server}:${APP_IMAGE_TAG:-dev}"
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "127.0.0.1:${PORT:-9090}:8000"

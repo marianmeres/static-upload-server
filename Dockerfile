@@ -37,6 +37,13 @@ USER appuser
 
 EXPOSE 8000
 
+# `GET /` (the version endpoint: no config, no disk) through Node's own fetch, since
+# node:26-slim has no curl. deploy.sh's `docker compose up --wait` waits for this, so a
+# release that never starts fails the deploy. Checked every 2 s while starting, then
+# every 30 s.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --start-interval=2s --retries=3 \
+    CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||8000)+'/').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+
 # Exec form, one process, no init wrapper: the stop signal reaches the server
 # directly, and `src/cli.ts` shuts down on it.
 CMD ["node", "src/cli.ts"]

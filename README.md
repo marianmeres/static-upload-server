@@ -274,9 +274,33 @@ Update your app to use the new token, then remove the old one and restart (or ca
 
 ## Docker
 
+Each release has an image on the GitHub Container Registry,
+`ghcr.io/marianmeres/static-upload-server:<tag>` (e.g. `:v2.1.0`; there is no `latest`).
+A GitHub Actions workflow builds it when a `vX.Y.Z` tag is pushed, after the test suite
+passes and the image itself has started and reported its version.
+
+### Deploying on a host
+
+In a clone of this repository on the host, with a `.env` beside `docker-compose.yml`
+(see [.env.example](.env.example)):
+
 ```bash
-docker compose up
+bash deploy.sh            # the latest release
+bash deploy.sh v2.1.0     # a given one; also how to roll back
 ```
+
+The script checks out the tag, pulls its image, replaces the container, waits until it
+reports healthy and checks that the server answers with the tag's version. Nothing is
+built on the host. If the pull fails, the running release keeps serving.
+
+`deploy.sh` writes the deployed tag into `.env` as `APP_IMAGE_TAG`, so a plain
+`docker compose up -d` (after editing `.env`, say) keeps running that release.
+
+If the image package on GitHub is private, the host needs
+`docker login ghcr.io -u <github-user>` once, with a token that has `read:packages`. A
+public package needs no login.
+
+### Volumes and file ownership
 
 The compose file mounts `./data` for static files and `./config` for project configs.
 
@@ -295,6 +319,15 @@ PGID=1000
 ```
 
 If not set, defaults to `1000:1000`.
+
+### Building the image locally
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
+docker compose up -d
+```
+
+The local image is tagged `dev`, so it is never mistaken for a release.
 
 ## License
 

@@ -1,0 +1,10 @@
+# Local builds only, layered over docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#
+# The result is tagged `dev` (APP_IMAGE_TAG unset), never a release. Kept out of
+# docker-compose.yml on purpose: with `build:` there, an image that fails to pull on the
+# deploy host is built on the host instead, under the release's own name.
+services:
+  upload-server:
+    build: .
