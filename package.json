@@ -1,6 +1,6 @@
 {
   "name": "@marianmeres/static-upload-server",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "description": "Self-hosted static file server with an upload endpoint: per-project config, token and JWT auth, multipart POST and streamed PUT uploads, plugins, optional CDN cache headers and purge.",
   "license": "MIT",
   "author": "Marian Meres",
