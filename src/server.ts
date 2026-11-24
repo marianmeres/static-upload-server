@@ -329,6 +329,12 @@ export async function createServer(
 				port: options.port,
 				// No WebSocket routes here: skip the adapter's optional `ws` lookup.
 				webSockets: false,
+				// No limit on a request's total duration. Node's default (5 minutes,
+				// body included) answers 408 to a large upload on a slow link
+				// however steadily it arrives. Uploads are bounded by the byte cap
+				// and the idle timeout instead, and the 60 s limit on the headers
+				// alone stays in force.
+				requestTimeout: 0,
 				// The banner below reports the listen address.
 				onListen: () => {},
 				// Belt-and-braces: `handler` catches its own errors; this catches

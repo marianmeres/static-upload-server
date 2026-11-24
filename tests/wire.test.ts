@@ -6,8 +6,9 @@
 
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { opendir, readFile } from "node:fs/promises";
-import { request } from "node:http";
+import { request, type Server } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -111,6 +112,31 @@ test("wire: start() binds a free port and answers with the version", async (t) =
 	const head = await fetch(`${origin}/`, { method: "HEAD" });
 	assert.deepStrictEqual(head.status, 200);
 	assert.deepStrictEqual(await head.text(), "");
+});
+
+test("wire: a request has no total-time limit, its headers still have one", async (t) => {
+	const { origin } = await listen(t);
+
+	// Node announces every request on this channel, with the server that took it.
+	const servers: Server[] = [];
+	const onRequest = (message: unknown) => {
+		servers.push((message as { server: Server }).server);
+	};
+	subscribe("http.server.request.start", onRequest);
+	try {
+		await (await fetch(`${origin}/`)).text();
+	} finally {
+		unsubscribe("http.server.request.start", onRequest);
+	}
+	const [server] = servers;
+	assert.ok(server, "the request reached no node:http server");
+
+	// Node's own default is 5 minutes for a whole request, body included: a
+	// large upload on a slow link would be cut with a 408 however steadily it
+	// arrives. Uploads here are bounded by size and by idleness instead.
+	assert.deepStrictEqual(server.requestTimeout, 0);
+	// A connection that never finishes its headers is still dropped.
+	assert.deepStrictEqual(server.headersTimeout, 60_000);
 });
 
 // ─── Uploads ────────────────────────────────────────────────────────

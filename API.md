@@ -30,7 +30,7 @@ The `ServeHandle` that `start()` resolves with:
 **Example:**
 
 ```ts
-import { createServer } from "@marianmeres/deno-static-upload-server";
+import { createServer } from "@marianmeres/static-upload-server";
 
 const { handler, start } = await createServer({
 	port: 8080,
@@ -48,14 +48,14 @@ await server.shutdown();
 const res = await handler(new Request("http://localhost/proj/file.txt"));
 ```
 
-The same module is also exported as `@marianmeres/deno-static-upload-server/server`.
+The same module is also exported as `@marianmeres/static-upload-server/server`.
 
 ### `clearConfigCache(configDir?)`
 
 Clears the project-config cache. Pass a `configDir` to clear only entries loaded from that directory; omit to clear all.
 
 ```ts
-import { clearConfigCache } from "@marianmeres/deno-static-upload-server";
+import { clearConfigCache } from "@marianmeres/static-upload-server";
 clearConfigCache("/var/data/config");
 ```
 
@@ -241,6 +241,10 @@ way as multipart filenames).
 
 Intended for machine clients (backup relays, CI, `curl -T`) and large files.
 
+An upload may take as long as it keeps arriving: the server puts no limit on a
+request's total duration. What bounds a `PUT` is the size cap and the idle
+timeout (`413` and `408` below).
+
 **Headers:**
 
 - `Authorization: Bearer <token>` — Required when project's `uploadTokens` is non-empty. The global token (`GLOBAL_TOKEN`) is also accepted.
@@ -389,13 +393,13 @@ The package's `bin` is a CLI that reads configuration from environment variables
 PORT=8000 \
 STATIC_DIR=./data \
 CONFIG_DIR=./config \
-npx @marianmeres/deno-static-upload-server
+npx @marianmeres/static-upload-server
 ```
 
 Or with a `.env` file, with the package installed locally:
 
 ```bash
-node --env-file=.env node_modules/.bin/deno-static-upload-server
+node --env-file=.env node_modules/.bin/static-upload-server
 ```
 
 From a checkout of the repository the entry is `node src/cli.ts` (Node runs the TypeScript as is).
@@ -518,9 +522,10 @@ The resulting `Cache-Control` string is the same one the adapter would have appl
 
 The server moved from Deno to Node. The HTTP API (routes, statuses, response bodies) is unchanged.
 
-- **Runtime**: Node 24.12 or newer. Published to npm; JSR stays at 1.7.0.
-- **Running it**: `npx @marianmeres/deno-static-upload-server` replaces `deno run -A jsr:…` and `deno install`. The Docker image is built on `node:26-slim`.
-- **Import specifier**: `@marianmeres/deno-static-upload-server` (also `…/server`) replaces `jsr:@marianmeres/deno-static-upload-server/server`.
+- **Renamed**: the package is `@marianmeres/static-upload-server` and its command `static-upload-server`. It was `@marianmeres/deno-static-upload-server`, a name that stays on JSR at 1.7.0 and gets no further releases. If a Docker Compose deployment also renames its checkout folder, run `docker compose down` first: Compose names the project after the folder, and the next `up` would fail on the fixed container name being in use.
+- **Runtime**: Node 24.12 or newer. Published to npm, no longer to JSR.
+- **Running it**: `npx @marianmeres/static-upload-server` replaces `deno run -A jsr:…` and `deno install`. The Docker image is built on `node:26-slim`.
+- **Import specifier**: `@marianmeres/static-upload-server` (also `…/server`) replaces `jsr:@marianmeres/deno-static-upload-server/server`.
 - **`start()`** is async and resolves with a `ServeHandle` (`port`, `shutdown()`, …) instead of returning a `Deno.HttpServer`.
 - **Plugins** are loaded by Node: erasable TypeScript only, no `npm:` / `jsr:` / `https:` imports, no `Deno` global. See [Plugin System](#plugin-system).
 - **Served files, header level**: the `ETag` value has another format (clients revalidate once), an unknown extension is sent as `application/octet-stream` (it had no `Content-Type`), and a 301 carries a relative `Location`. A path with malformed percent-encoding is `400` (was `500`).

@@ -1,8 +1,8 @@
-# deno-static-upload-server — Agent Guide
+# static-upload-server — Agent Guide
 
 ## Quick Reference
 
-- **Stack**: Node (>= 24.12, `.node-version` 26), TypeScript run as is (erasable syntax only), pnpm, Biome. Runtime deps: `@marianmeres/demino` (`serve` from `/node`, `serveStatic`), `mime-types`
+- **Stack**: Node (>= 24.12, `.node-version` 26), TypeScript run as is (erasable syntax only), pnpm, Biome. Runtime deps: `@marianmeres/demino` >= 2.2.0 (`serve` from `/node`, `serveStatic`), `mime-types`
 - **Gate**: `pnpm run ci` (typecheck + lint + test + smoke)
 - **Test**: `pnpm test` (`node:test`, `node:assert/strict`)
 - **Typecheck**: `pnpm run typecheck` (Node never checks types; this is the type gate)
@@ -109,7 +109,7 @@ npm publishes `dist/` only. A checkout and the Docker image run `src/*.ts` direc
 - **Path boundary**: `resolveUnderStaticDir()` uses `node:path`'s `relative()` instead of string `startsWith`.
 - **Plugin sandbox**: `loadPlugin` rejects paths that resolve outside configDir; imports via `pathToFileURL` for cross-platform safety. Node imports the plugin as is: erasable TypeScript only, relative and `node:` imports, no `Deno` global.
 - **Lazy file loads**: `package.json` (for version) and `upload.html` are read on first use, not at import time, both relative to the module (`../package.json`, `../upload.html`). That resolves the same from `src/` and from `dist/`, which is why the build copies `upload.html` into `dist/`.
-- **HTTP layer**: `start()` runs `handler` on demino's Node adapter (`serve`, `webSockets: false`). A request body is the socket as a web stream, so PUT reads it with backpressure. An upload refused before its body was read (401, 413 by `Content-Length`, policy reject) is answered at once and the rest of the body is never read; the server closes that connection when its keep-alive timeout runs out. `tests/wire.test.ts` pins this.
+- **HTTP layer**: `start()` runs `handler` on demino's Node adapter (`serve`, `webSockets: false`). A request body is the socket as a web stream, so PUT reads it with backpressure. An upload refused before its body was read (401, 413 by `Content-Length`, policy reject) is answered at once and the rest of the body is never read; the server closes that connection when its keep-alive timeout runs out. `tests/wire.test.ts` pins this. `requestTimeout: 0` (demino >= 2.2.0) switches off Node's 5-minute limit on a whole request, which would 408 a long upload however steadily it arrives: a PUT is bounded by the byte cap and the idle timeout, the multipart POST only by the reverse proxy. Node's 60 s limit on the headers stays; the wire tests pin both values through the `http.server.request.start` diagnostics channel.
 - **Serving**: `serveStatic` does the file work (Range, `If-Range`, `ETag` / `Last-Modified`, HEAD, `index.html` for a directory, dot-segments 404). `handleServe` overrides its `Content-Type` with `contentTypeOf` (demino's own table lacks vendor types such as `.ico`, `.xlsx`) and adds nosniff, `Content-Disposition` and the CORS headers.
 - **Shutdown**: the CLI handles SIGTERM / SIGINT with `ServeHandle.shutdown()` and exits 0. In the Docker image `node` is PID 1 and gets no default signal action, so without the handler `docker stop` would time out.
 - **Logger**: all handlers receive a `Logger`. `silentLogger` by default. Events: `upload.unauthorized`, `upload.done`, `upload.write_failed`, `upload.idle_timeout`, `delete.unauthorized`, `delete.done`, `serve.unauthorized`, `serve.jwt_not_configured`, `config.load_failed`, `plugin.error`, `cdn.purge_failed`, `tmp.swept`, `request.unhandled`. PUT-originated upload events carry `via: "put"`.
@@ -176,16 +176,17 @@ Docker: `PUID`, `PGID`.
 
 The move from Deno to Node. The HTTP API (routes, statuses, response bodies) is unchanged.
 
-| Change                                                                                                   | Mitigation                                                                                    |
-| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Runtime is Node >= 24.12; published to npm (JSR stays at 1.7.0)                                          | `npx <package>` replaces `deno run -A jsr:…` / `deno install`; Docker image is `node:26-slim` |
-| Import specifier is the bare package name (`"."`, also `"./server"`)                                     | Replace `jsr:@marianmeres/deno-static-upload-server/server`                                   |
-| `start()` is async and resolves with a `ServeHandle`, not a `Deno.HttpServer`                            | `await start()`; use `handle.port`, `handle.shutdown()`                                       |
-| Plugins are loaded by Node                                                                               | Erasable TypeScript only; no `npm:` / `jsr:` / `https:` imports; no `Deno` global             |
-| Served files: new `ETag` format, unknown extension → `application/octet-stream`, relative 301 `Location` | None needed; clients revalidate once                                                          |
-| GET of a path with malformed percent-encoding is `400` (was `500`)                                       | None needed                                                                                   |
-| The per-request access line GETs printed to stdout is gone                                               | Use the reverse proxy's access log; structured events (`LOG=true`) are unchanged              |
-| `PORT=0` binds a free port (used to fall back to `8000`)                                                 | Unset `PORT` for the default                                                                  |
+| Change                                                                                                                                | Mitigation                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Package renamed to `@marianmeres/static-upload-server`, command `static-upload-server` (was `@marianmeres/deno-static-upload-server`) | Update the dependency name and the command; the old name stays on JSR at 1.7.0, with no further releases |
+| Runtime is Node >= 24.12; published to npm (JSR stays at 1.7.0)                                                                       | `npx <package>` replaces `deno run -A jsr:…` / `deno install`; Docker image is `node:26-slim`            |
+| Import specifier is the bare package name (`"."`, also `"./server"`)                                                                  | Replace `jsr:@marianmeres/deno-static-upload-server/server`                                              |
+| `start()` is async and resolves with a `ServeHandle`, not a `Deno.HttpServer`                                                         | `await start()`; use `handle.port`, `handle.shutdown()`                                                  |
+| Plugins are loaded by Node                                                                                                            | Erasable TypeScript only; no `npm:` / `jsr:` / `https:` imports; no `Deno` global                        |
+| Served files: new `ETag` format, unknown extension → `application/octet-stream`, relative 301 `Location`                              | None needed; clients revalidate once                                                                     |
+| GET of a path with malformed percent-encoding is `400` (was `500`)                                                                    | None needed                                                                                              |
+| The per-request access line GETs printed to stdout is gone                                                                            | Use the reverse proxy's access log; structured events (`LOG=true`) are unchanged                         |
+| `PORT=0` binds a free port (used to fall back to `8000`)                                                                              | Unset `PORT` for the default                                                                             |
 
 ## Before Making Changes
 

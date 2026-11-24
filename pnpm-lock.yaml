@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@marianmeres/demino':
-        specifier: ^2.1.3
-        version: 2.1.3
+        specifier: ^2.2.0
+        version: 2.2.0
       mime-types:
         specifier: ^3.0.2
         version: 3.0.2
@@ -266,8 +266,8 @@ packages:
       '@marianmeres/batch':
         optional: true
 
-  '@marianmeres/demino@2.1.3':
-    resolution: {integrity: sha512-RljF/gRlIzAAPQL4Kdvxp6cB3/MbbAO1LhucPgzt4AQ8wLGkxOUcph8lc0iB6VEKzBanM8+eZfDH6MRczq17qw==}
+  '@marianmeres/demino@2.2.0':
+    resolution: {integrity: sha512-lh6aqbg+IeLq+KT5yQQEMayRKgNFvYh48ATzsGnYos20r/8+7/7d8RVlvWJPVafWC/SiRU79//fyz8hdzjiXJQ==}
     engines: {node: '>=22'}
     peerDependencies:
       ws: ^8.18
@@ -480,7 +480,7 @@ snapshots:
 
   '@marianmeres/clog@3.23.1': {}
 
-  '@marianmeres/demino@2.1.3':
+  '@marianmeres/demino@2.2.0':
     dependencies:
       '@marianmeres/clog': 3.23.1
       '@marianmeres/http-utils': 3.0.0

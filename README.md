@@ -1,7 +1,7 @@
-# @marianmeres/deno-static-upload-server
+# @marianmeres/static-upload-server
 
-[![NPM](https://img.shields.io/npm/v/@marianmeres/deno-static-upload-server)](https://www.npmjs.com/package/@marianmeres/deno-static-upload-server)
-[![License](https://img.shields.io/github/license/marianmeres/deno-static-upload-server)](LICENSE)
+[![NPM](https://img.shields.io/npm/v/@marianmeres/static-upload-server)](https://www.npmjs.com/package/@marianmeres/static-upload-server)
+[![License](https://img.shields.io/github/license/marianmeres/static-upload-server)](LICENSE)
 
 A lightweight, self-hosted static file server with upload endpoint and per-project configuration. Built for a reliable home for static assets without the complexity of a full cloud storage setup.
 
@@ -34,24 +34,25 @@ echo '{"uploadTokens": ["my-secret-token"]}' > config/my-app.json
 
 ### 2. Run the server
 
-Requires Node 24.12 or newer. (Coming from the Deno-based 1.x? See the
+Requires Node 24.12 or newer. (Coming from the Deno-based 1.x, published on JSR
+as `@marianmeres/deno-static-upload-server`? See the
 [breaking changes](API.md#breaking-changes-from-170).)
 
 ```bash
 PORT=8000 \
 STATIC_DIR=./static \
 CONFIG_DIR=./config \
-npx @marianmeres/deno-static-upload-server
+npx @marianmeres/static-upload-server
 ```
 
 ### Programmatic usage
 
 ```bash
-npm install @marianmeres/deno-static-upload-server
+npm install @marianmeres/static-upload-server
 ```
 
 ```ts
-import { createServer } from "@marianmeres/deno-static-upload-server";
+import { createServer } from "@marianmeres/static-upload-server";
 
 const server = await createServer({
 	port: 8000,
@@ -117,7 +118,7 @@ Set `GLOBAL_TOKEN` to define a superuser token accepted for uploads, deletes, an
 Node loads it with `--env-file`. With the package installed locally:
 
 ```bash
-node --env-file=.env node_modules/.bin/deno-static-upload-server
+node --env-file=.env node_modules/.bin/static-upload-server
 ```
 
 From a checkout of this repository it is `node --env-file=.env src/cli.ts`.
@@ -232,6 +233,7 @@ The API token needs the **Cache Purge** permission for your zone. See [API.md](A
 - **Plugin sandbox**: plugin paths must resolve inside `configDir`.
 - **`maxFileSize`** enforcement is streaming — oversized uploads are aborted mid-stream (the temp file is removed). Projects without `maxFileSize` fall back to the server-level `maxUploadSize` (default 2 GiB; `MAX_UPLOAD_SIZE=0` for unlimited) so a single streaming upload can't fill the disk.
 - **Stalled uploads** are aborted after 60s without a body chunk (`UPLOAD_IDLE_TIMEOUT_MS`, `0` disables) so slow-drip connections can't pin file descriptors and temp files indefinitely.
+- **No limit on a request's total duration.** Node's own 5-minute limit on a whole request is switched off: it would cut a large upload on a slow link however steadily it arrives. A `PUT` is bounded by the size cap and the stall timeout above instead. The multipart `POST` route has no time bound of its own (its body is parsed before any check), so bound it at the reverse proxy. Request headers still have to arrive within 60 s.
 - **Unhandled request errors** return a generic 500 and are logged as `request.unhandled` with the stack — enable `LOG=true` in production (docker-compose does this by default).
 - **Recommendation for public upload endpoints**: serve uploaded files from a dedicated cookieless domain, and combine with `forceDownload` and `allowedExtensions`/`allowedMimeTypes` to constrain accepted content.
 - **Rate limiting** is out of scope — put a reverse-proxy limiter in front of the server if exposed to the public internet.

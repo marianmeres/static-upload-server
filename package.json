@@ -1,5 +1,5 @@
 {
-  "name": "@marianmeres/deno-static-upload-server",
+  "name": "@marianmeres/static-upload-server",
   "version": "1.7.0",
   "description": "Self-hosted static file server with an upload endpoint: per-project config, token and JWT auth, multipart POST and streamed PUT uploads, plugins, optional CDN cache headers and purge.",
   "license": "MIT",
@@ -15,7 +15,7 @@
   "main": "./dist/server.js",
   "types": "./dist/server.d.ts",
   "bin": {
-    "deno-static-upload-server": "./dist/cli.js"
+    "static-upload-server": "./dist/cli.js"
   },
   "exports": {
     ".": {
@@ -34,12 +34,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/marianmeres/deno-static-upload-server.git"
+    "url": "git+https://github.com/marianmeres/static-upload-server.git"
   },
   "bugs": {
-    "url": "https://github.com/marianmeres/deno-static-upload-server/issues"
+    "url": "https://github.com/marianmeres/static-upload-server/issues"
   },
-  "homepage": "https://github.com/marianmeres/deno-static-upload-server#readme",
+  "homepage": "https://github.com/marianmeres/static-upload-server#readme",
   "keywords": [
     "static",
     "upload",
@@ -75,7 +75,7 @@
     "deploy": "bash deploy.sh"
   },
   "dependencies": {
-    "@marianmeres/demino": "^2.1.3",
+    "@marianmeres/demino": "^2.2.0",
     "mime-types": "^3.0.2"
   },
   "devDependencies": {
