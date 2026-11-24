@@ -65,8 +65,8 @@ export async function createCdnAdapter(
 
 	const cacheMaxAge = opts.cacheMaxAge ?? DEFAULT_CACHE_MAX_AGE;
 	const cacheSMaxAge = opts.cacheSMaxAge ?? DEFAULT_CACHE_S_MAXAGE;
-	const staleWhileRevalidate = opts.staleWhileRevalidate ??
-		DEFAULT_STALE_WHILE_REVALIDATE;
+	const staleWhileRevalidate =
+		opts.staleWhileRevalidate ?? DEFAULT_STALE_WHILE_REVALIDATE;
 	const purgeUrlPrefix = opts.purgeUrlPrefix.replace(/\/+$/, ""); // strip trailing slash
 
 	switch (opts.provider) {

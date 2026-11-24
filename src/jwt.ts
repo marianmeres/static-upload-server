@@ -38,9 +38,7 @@ export async function verifyJwt(
 
 	// Verify header is HS256
 	try {
-		const header = JSON.parse(
-			new TextDecoder().decode(base64UrlDecode(headerB64)),
-		);
+		const header = JSON.parse(new TextDecoder().decode(base64UrlDecode(headerB64)));
 		if (header.alg !== "HS256") return null;
 		// `typ` is OPTIONAL per RFC 7519 §5.1. Only reject when present and wrong.
 		if (header.typ !== undefined && header.typ !== "JWT") return null;
@@ -72,18 +70,13 @@ export async function verifyJwt(
 	// Decode payload
 	let payload: JwtPayload;
 	try {
-		payload = JSON.parse(
-			new TextDecoder().decode(base64UrlDecode(payloadB64)),
-		);
+		payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(payloadB64)));
 	} catch {
 		return null;
 	}
 
 	// Check expiration
-	if (
-		typeof payload.exp === "number" &&
-		payload.exp < Math.floor(Date.now() / 1000)
-	) {
+	if (typeof payload.exp === "number" && payload.exp < Math.floor(Date.now() / 1000)) {
 		return null;
 	}
 

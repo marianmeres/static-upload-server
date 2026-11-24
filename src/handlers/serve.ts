@@ -1,10 +1,11 @@
-import { serveDir } from "@std/http/file-server";
-import type { ProjectConfig } from "../config.ts";
+import { serveStatic } from "@marianmeres/demino";
 import { extractBearerToken, isAuthorized, timingSafeEqualStr } from "../auth.ts";
-import { verifyJwt } from "../jwt.ts";
-import type { CdnAdapter } from "../cdn.ts";
-import type { Logger } from "../logger.ts";
 import { resolveCacheStrategy } from "../cache-strategy.ts";
+import type { CdnAdapter } from "../cdn.ts";
+import type { ProjectConfig } from "../config.ts";
+import { contentTypeOf } from "../content-type.ts";
+import { verifyJwt } from "../jwt.ts";
+import type { Logger } from "../logger.ts";
 
 interface ServeDeps {
 	jwtSecret?: string;
@@ -21,12 +22,23 @@ function isProtected(config: ProjectConfig): boolean {
 	);
 }
 
-function addHardeningHeaders(res: Response, forceDownload?: boolean): Response {
+/** Request headers a cross-origin page may send with a GET of public content. */
+const CORS_ALLOW_HEADERS = "Origin, X-Requested-With, Content-Type, Accept, Range";
+
+function addResponseHeaders(
+	res: Response,
+	opts: { cors: boolean; forceDownload?: boolean },
+): Response {
 	const headers = new Headers(res.headers);
 	// Prevent MIME sniffing — user-uploaded content must not be reinterpreted.
 	headers.set("X-Content-Type-Options", "nosniff");
-	if (forceDownload && !headers.has("Content-Disposition")) {
+	if (opts.forceDownload && !headers.has("Content-Disposition")) {
 		headers.set("Content-Disposition", "attachment");
+	}
+	// On every answer but a redirect (the redirect's target gets them).
+	if (opts.cors && res.status !== 301) {
+		headers.set("Access-Control-Allow-Origin", "*");
+		headers.set("Access-Control-Allow-Headers", CORS_ALLOW_HEADERS);
 	}
 	return new Response(res.body, {
 		status: res.status,
@@ -41,7 +53,7 @@ function addHardeningHeaders(res: Response, forceDownload?: boolean): Response {
  * `filePath` is the project-relative path (no leading `/`, no `:projectId`
  * segment). For root-file mounts (favicon.ico, robots.txt, …) it's just the
  * filename. Used both as the cache-strategy lookup key and (implicitly via
- * `req.url`) by `serveDir` for the filesystem lookup.
+ * `req.url`) by `serveStatic` for the filesystem lookup.
  */
 export async function handleServe(
 	req: Request,
@@ -91,17 +103,25 @@ export async function handleServe(
 	// fetchable cross-origin without an explicit server-side opt-in.
 	const enableCors = !isProtected(config);
 
-	// `serveDir` (@std/http >= 1.0) handles HEAD natively — returns the
-	// correct headers (Content-Length, ETag, Last-Modified, …) with a null
-	// body and short-circuits the file read. Pass the request through as-is.
-	let res = await serveDir(req, {
+	// `serveStatic` handles HEAD itself — the same headers (Content-Length,
+	// ETag, Last-Modified, …) with no body, and the file is never opened. Pass
+	// the request through as-is. Range requests, conditional requests and the
+	// directory/dotfile rules are its job too.
+	let res = await serveStatic(req, {
 		fsRoot: staticDir,
-		urlRoot: "",
-		enableCors,
+		// The full MIME table (the one the PUT policy check derives from); an
+		// unknown extension keeps serveStatic's `application/octet-stream`.
+		headers: (_req: Request, path: string) => {
+			const type = contentTypeOf(path);
+			return type ? { "content-type": type } : undefined;
+		},
 	});
 
-	// Apply hardening headers before anything else copies them.
-	res = addHardeningHeaders(res, config.forceDownload);
+	// Apply hardening and CORS headers before anything else copies them.
+	res = addResponseHeaders(res, {
+		cors: enableCors,
+		forceDownload: config.forceDownload,
+	});
 
 	const strategy = resolveCacheStrategy(config.cacheStrategy, "/" + filePath);
 	return cdn ? cdn.applyCacheHeaders(res, strategy === "immutable") : res;

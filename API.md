@@ -12,14 +12,25 @@ Creates a static upload server instance. This is an **async** function due to CD
 
 **Returns:** `Promise<{ handler, start, version }>`
 
-- `handler(req: Request): Promise<Response>` — The raw request handler. Useful for testing or embedding in another server.
-- `start(): Deno.HttpServer` — Starts listening and returns the `Deno.HttpServer` instance.
+- `handler(req: Request): Promise<Response>` — The raw, web-standard request handler. Useful for testing or embedding in another server.
+- `start(): Promise<ServeHandle>` — Starts listening on `port` and resolves once the server is bound. Rejects when the port cannot be bound.
 - `version: string` — The resolved package version.
+
+The `ServeHandle` that `start()` resolves with:
+
+| Member              | Type            | Description                                                                   |
+| ------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `port`              | `number`        | The bound port (the real one, also when `port: 0` asked for a free port)      |
+| `hostname`          | `string`        | The bound hostname (`0.0.0.0`)                                                |
+| `url`               | `string`        | `http://<host>:<port>/`                                                       |
+| `shutdown()`        | `Promise<void>` | Graceful stop: no new connections, requests in flight get up to 5 s to finish |
+| `finished`          | `Promise<void>` | Resolves once the listener is closed                                          |
+| `ref()` / `unref()` | `void`          | Keep the process alive while the server runs (the default), or let it exit    |
 
 **Example:**
 
 ```ts
-import { createServer } from "jsr:@marianmeres/deno-static-upload-server/server";
+import { createServer } from "@marianmeres/deno-static-upload-server";
 
 const { handler, start } = await createServer({
 	port: 8080,
@@ -29,18 +40,22 @@ const { handler, start } = await createServer({
 });
 
 // Option A: start the server
-start();
+const server = await start();
+// ... later
+await server.shutdown();
 
 // Option B: use the handler directly (e.g. in tests)
 const res = await handler(new Request("http://localhost/proj/file.txt"));
 ```
+
+The same module is also exported as `@marianmeres/deno-static-upload-server/server`.
 
 ### `clearConfigCache(configDir?)`
 
 Clears the project-config cache. Pass a `configDir` to clear only entries loaded from that directory; omit to clear all.
 
 ```ts
-import { clearConfigCache } from "jsr:@marianmeres/deno-static-upload-server/server";
+import { clearConfigCache } from "@marianmeres/deno-static-upload-server";
 clearConfigCache("/var/data/config");
 ```
 
@@ -69,7 +84,7 @@ interface StaticServerOptions {
 
 | Field                 | Type                  | Default         | Description                                                                                      |
 | --------------------- | --------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
-| `port`                | `number`              | `8000`          | Port to listen on                                                                                |
+| `port`                | `number`              | `8000`          | Port to listen on. `0` picks a free one (read it from the handle `start()` resolves with)        |
 | `staticDir`           | `string`              | `"./static"`    | Root directory for stored files                                                                  |
 | `configDir`           | `string`              | `"./config"`    | Directory containing per-project JSON config files                                               |
 | `enableUploadForm`    | `boolean`             | `true`          | Server-level default for upload form (per-project `enableUploadForm` overrides)                  |
@@ -176,7 +191,7 @@ Use for `favicon.ico`, `robots.txt`, etc.
 Upload one or more files via `multipart/form-data`.
 
 > **Memory note:** parsing multipart buffers the **whole request body in RAM**
-> (~3–3.5× the file size at peak, per concurrent upload). This route is meant
+> (about 4× the file size at peak, per concurrent upload). This route is meant
 > for the browser upload form and small files. Machine clients uploading large
 > files should use [`PUT /:projectId/path`](#put-projectidpathtofile), which
 > streams the body straight to disk.
@@ -302,9 +317,13 @@ Serves the built-in HTML upload form (when `enableUploadForm` is `true`). The fo
 
 ### `GET /:projectId/path/to/file`
 
-Serves static files. Powered by `@std/http/file-server`.
+Serves static files (through `serveStatic` of `@marianmeres/demino`).
 
-Supports range requests, ETags, and correct `Content-Type` headers.
+- A single `Range` is answered with `206` (`If-Range` honoured); an unsatisfiable one with `416`.
+- `ETag` (weak) and `Last-Modified` are sent, and `If-None-Match` / `If-Modified-Since` answered with `304`.
+- `Content-Type` comes from the file extension (the `mime-types` table, text types with a charset); an unknown extension is `application/octet-stream`.
+- A directory serves its `index.html` if it has one, else `404`. There is no directory listing.
+- A path with a dot-segment (`/proj/.env`, `/proj/.git/config`) is `404`.
 
 All served files receive:
 
@@ -344,6 +363,12 @@ export default async function (
 
 Plugin paths must resolve inside `configDir` (sandbox enforced at load time).
 
+The module is imported by Node as is, with its types stripped:
+
+- TypeScript is fine, limited to syntax that erases cleanly: no `enum`, `namespace` or constructor parameter properties.
+- Imports are relative files or Node built-ins (`node:fs`, …). A bare package import resolves from the plugin's own directory, so it needs a `node_modules` there or above it. `npm:`, `jsr:` and `https:` specifiers do not load.
+- There is no `Deno` global.
+
 The `PluginContext` provides:
 
 | Field            | Type                                  | Description                       |
@@ -358,26 +383,30 @@ The `PluginContext` provides:
 
 ## CLI Entry Point
 
-The default export (`"."`) is a CLI that reads configuration from environment variables:
+The package's `bin` is a CLI that reads configuration from environment variables (Node 24.12 or newer):
 
 ```bash
 PORT=8000 \
 STATIC_DIR=./data \
 CONFIG_DIR=./config \
-deno run -A jsr:@marianmeres/deno-static-upload-server
+npx @marianmeres/deno-static-upload-server
 ```
 
-Or with a `.env` file:
+Or with a `.env` file, with the package installed locally:
 
 ```bash
-deno run --env=.env -A jsr:@marianmeres/deno-static-upload-server
+node --env-file=.env node_modules/.bin/deno-static-upload-server
 ```
+
+From a checkout of the repository the entry is `node src/cli.ts` (Node runs the TypeScript as is).
+
+On `SIGTERM` or `SIGINT` the CLI stops accepting connections, gives requests in flight up to 5 s to finish, and exits `0`.
 
 **Environment variables:**
 
 | Variable                     | Purpose                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------- |
-| `PORT`                       | Port to listen on                                                               |
+| `PORT`                       | Port to listen on. `0` = a free port, printed at startup                        |
 | `STATIC_DIR`                 | Root static file dir                                                            |
 | `CONFIG_DIR`                 | Project configs dir                                                             |
 | `ENABLE_UPLOAD_FORM`         | `false` disables upload form globally                                           |
@@ -470,7 +499,7 @@ The resulting `Cache-Control` string is the same one the adapter would have appl
 ## Security
 
 - **Project isolation:** Each project requires a config file. Requests to unconfigured projects return 404.
-- **Path traversal prevention:** `..` and `.` segments are stripped. Resolved paths are verified with `@std/path` `relative()` to remain within the static directory.
+- **Path traversal prevention:** `..` and `.` segments are stripped. Resolved paths are verified with `node:path`'s `relative()` to remain within the static directory.
 - **Filename sanitization:** Non-alphanumeric characters (except `.`, `-`, `_`) are replaced with `_`.
 - **Upload auth:** Per-project `uploadTokens`. When non-empty, uploads and deletes require a valid bearer token.
 - **Download auth:** Per-project `downloadTokens`. When non-empty, GET requests require a matching bearer token.
@@ -484,6 +513,19 @@ The resulting `Cache-Control` string is the same one the adapter would have appl
 - **Atomic writes**: uploads write to `.tmp_<uuid>` then atomically rename. Startup sweeps stale temp files.
 
 ---
+
+## Breaking Changes (from 1.7.0)
+
+The server moved from Deno to Node. The HTTP API (routes, statuses, response bodies) is unchanged.
+
+- **Runtime**: Node 24.12 or newer. Published to npm; JSR stays at 1.7.0.
+- **Running it**: `npx @marianmeres/deno-static-upload-server` replaces `deno run -A jsr:…` and `deno install`. The Docker image is built on `node:26-slim`.
+- **Import specifier**: `@marianmeres/deno-static-upload-server` (also `…/server`) replaces `jsr:@marianmeres/deno-static-upload-server/server`.
+- **`start()`** is async and resolves with a `ServeHandle` (`port`, `shutdown()`, …) instead of returning a `Deno.HttpServer`.
+- **Plugins** are loaded by Node: erasable TypeScript only, no `npm:` / `jsr:` / `https:` imports, no `Deno` global. See [Plugin System](#plugin-system).
+- **Served files, header level**: the `ETag` value has another format (clients revalidate once), an unknown extension is sent as `application/octet-stream` (it had no `Content-Type`), and a 301 carries a relative `Location`. A path with malformed percent-encoding is `400` (was `500`).
+- **Logs**: the per-request access line that GETs printed to stdout is gone. Structured events (`LOG=true`) are unchanged.
+- **`PORT=0`** binds a free port (it used to fall back to `8000`).
 
 ## Breaking Changes (from 1.4.3)
 

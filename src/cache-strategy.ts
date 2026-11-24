@@ -27,10 +27,7 @@ export function resolveCacheStrategy(
 			fallback = strategy;
 			continue;
 		}
-		if (
-			filePath.startsWith(prefix) &&
-			prefix.length > (best?.len ?? -1)
-		) {
+		if (filePath.startsWith(prefix) && prefix.length > (best?.len ?? -1)) {
 			best = { len: prefix.length, strategy };
 		}
 	}

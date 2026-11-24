@@ -1,13 +1,11 @@
-import { assertEquals } from "@std/assert";
+import assert from "node:assert/strict";
+import { test } from "node:test";
 import { verifyJwt } from "../src/jwt.ts";
 
 const SECRET = "s3cret";
 
 function b64url(s: string): string {
-	return btoa(s)
-		.replace(/\+/g, "-")
-		.replace(/\//g, "_")
-		.replace(/=+$/, "");
+	return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 async function sign(headerJson: string, payloadJson: string): Promise<string> {
@@ -33,34 +31,31 @@ async function sign(headerJson: string, payloadJson: string): Promise<string> {
 	return `${headerB64}.${payloadB64}.${sigB64}`;
 }
 
-Deno.test("jwt: typ=JWT is accepted", async () => {
+test("jwt: typ=JWT is accepted", async () => {
 	const t = await sign(
 		JSON.stringify({ alg: "HS256", typ: "JWT" }),
 		JSON.stringify({ sub: "x" }),
 	);
 	const p = await verifyJwt(t, SECRET);
-	assertEquals(p?.sub, "x");
+	assert.deepStrictEqual(p?.sub, "x");
 });
 
-Deno.test("jwt: typ omitted is accepted per RFC 7519", async () => {
-	const t = await sign(
-		JSON.stringify({ alg: "HS256" }),
-		JSON.stringify({ sub: "x" }),
-	);
+test("jwt: typ omitted is accepted per RFC 7519", async () => {
+	const t = await sign(JSON.stringify({ alg: "HS256" }), JSON.stringify({ sub: "x" }));
 	const p = await verifyJwt(t, SECRET);
-	assertEquals(p?.sub, "x");
+	assert.deepStrictEqual(p?.sub, "x");
 });
 
-Deno.test("jwt: typ wrong value is rejected", async () => {
+test("jwt: typ wrong value is rejected", async () => {
 	const t = await sign(
 		JSON.stringify({ alg: "HS256", typ: "something-else" }),
 		JSON.stringify({ sub: "x" }),
 	);
 	const p = await verifyJwt(t, SECRET);
-	assertEquals(p, null);
+	assert.deepStrictEqual(p, null);
 });
 
-Deno.test("jwt: alg !== HS256 is rejected", async () => {
+test("jwt: alg !== HS256 is rejected", async () => {
 	// sign with HS256 but claim alg=RS256 — must be rejected by alg check
 	const bad = JSON.stringify({ alg: "RS256", typ: "JWT" });
 	const payload = JSON.stringify({ sub: "x" });
@@ -84,14 +79,14 @@ Deno.test("jwt: alg !== HS256 is rejected", async () => {
 		.replace(/\//g, "_")
 		.replace(/=+$/, "");
 	const p = await verifyJwt(`${headerB64}.${payloadB64}.${sigB64}`, SECRET);
-	assertEquals(p, null);
+	assert.deepStrictEqual(p, null);
 });
 
-Deno.test("jwt: expired token is rejected", async () => {
+test("jwt: expired token is rejected", async () => {
 	const t = await sign(
 		JSON.stringify({ alg: "HS256", typ: "JWT" }),
 		JSON.stringify({ sub: "x", exp: 1 }),
 	);
 	const p = await verifyJwt(t, SECRET);
-	assertEquals(p, null);
+	assert.deepStrictEqual(p, null);
 });

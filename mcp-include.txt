@@ -1,2 +1,2 @@
-Static file upload and serving server for Deno. Supports per-project config with token-based 
+Static file upload and serving server (Node). Supports per-project config with token-based 
 auth, file upload/delete/serve routes, plugin system, and CDN integration (Cloudflare).

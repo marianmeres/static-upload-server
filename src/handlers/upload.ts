@@ -1,11 +1,11 @@
-import { resolve } from "@std/path";
-import type { ProjectConfig } from "../config.ts";
+import { resolve } from "node:path";
 import { isAuthorized } from "../auth.ts";
 import type { CdnAdapter } from "../cdn.ts";
-import { resolveUnderStaticDir, sanitizePath } from "../paths.ts";
+import type { ProjectConfig } from "../config.ts";
 import { checkUploadPolicy } from "../content-type.ts";
 import type { Logger } from "../logger.ts";
-import { saveStreamAtomic, SizeLimitError } from "../storage.ts";
+import { resolveUnderStaticDir, sanitizePath } from "../paths.ts";
+import { SizeLimitError, saveStreamAtomic } from "../storage.ts";
 
 /** Dependencies shared by the upload handlers (POST multipart, PUT raw body). */
 export interface UploadDeps {
@@ -146,7 +146,5 @@ export async function handleUpload(
 		return Response.json({ uploaded, rejected }, { status: 400 });
 	}
 
-	return Response.json(
-		rejected.length > 0 ? { uploaded, rejected } : { uploaded },
-	);
+	return Response.json(rejected.length > 0 ? { uploaded, rejected } : { uploaded });
 }

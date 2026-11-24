@@ -1,4 +1,5 @@
-import { relative, resolve, toFileUrl } from "@std/path";
+import { relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { ProjectConfig } from "./config.ts";
 
 /** Context passed to plugin handlers. */
@@ -44,21 +45,17 @@ export async function loadPlugin(
 	// Sandbox: plugin must resolve inside configDir.
 	const rel = relative(absConfigDir, absPath);
 	if (rel.startsWith("..") || rel === "" || rel.startsWith("/")) {
-		throw new Error(
-			`Plugin path must resolve inside configDir: ${pluginPath}`,
-		);
+		throw new Error(`Plugin path must resolve inside configDir: ${pluginPath}`);
 	}
 
 	const cached = pluginCache.get(absPath);
 	if (cached) return cached;
 
 	// Convert to file:// URL so dynamic import works cross-platform.
-	const mod = await import(toFileUrl(absPath).href);
+	const mod = await import(pathToFileURL(absPath).href);
 
 	if (typeof mod.default !== "function") {
-		throw new Error(
-			`Plugin must default-export a handler function: ${pluginPath}`,
-		);
+		throw new Error(`Plugin must default-export a handler function: ${pluginPath}`);
 	}
 
 	const handler = mod.default as PluginHandler;

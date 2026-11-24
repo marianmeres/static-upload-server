@@ -9,7 +9,9 @@
  * @module
  */
 
-import { dirname } from "@std/path";
+import { mkdir, open, rename, unlink } from "node:fs/promises";
+import { dirname } from "node:path";
+import type { ReadableStreamReadResult } from "node:stream/web";
 
 /** Thrown when the source stream exceeds the configured byte cap. */
 export class SizeLimitError extends Error {
@@ -82,11 +84,8 @@ export async function writeWithLimit(
 	opts: SaveStreamOptions = {},
 ): Promise<number> {
 	const { maxBytes, expectedBytes, idleTimeoutMs } = opts;
-	const file = await Deno.open(tmpPath, {
-		create: true,
-		write: true,
-		truncate: true,
-	});
+	// "w": create, write-only, truncate
+	const file = await open(tmpPath, "w");
 	let written = 0;
 	const reader = source.getReader();
 	try {
@@ -100,7 +99,8 @@ export async function writeWithLimit(
 			}
 			let off = 0;
 			while (off < value.byteLength) {
-				off += await file.write(value.subarray(off));
+				const { bytesWritten } = await file.write(value.subarray(off));
+				off += bytesWritten;
 			}
 		}
 		if (expectedBytes !== undefined && written !== expectedBytes) {
@@ -116,7 +116,7 @@ export async function writeWithLimit(
 		throw e;
 	} finally {
 		try {
-			file.close();
+			await file.close();
 		} catch {
 			// already closed
 		}
@@ -139,15 +139,15 @@ export async function saveStreamAtomic(
 	source: ReadableStream<Uint8Array>,
 	opts: SaveStreamOptions = {},
 ): Promise<number> {
-	await Deno.mkdir(dirname(destPath), { recursive: true });
+	await mkdir(dirname(destPath), { recursive: true });
 	const tmpPath = destPath + `.tmp_${crypto.randomUUID()}`;
 	try {
 		const written = await writeWithLimit(tmpPath, source, opts);
-		await Deno.rename(tmpPath, destPath);
+		await rename(tmpPath, destPath);
 		return written;
 	} catch (e) {
 		try {
-			await Deno.remove(tmpPath);
+			await unlink(tmpPath);
 		} catch {
 			// ignore cleanup errors
 		}

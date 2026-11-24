@@ -1,16 +1,15 @@
-import { resolve } from "@std/path";
-import { contentType } from "@std/media-types";
-import type { ProjectConfig } from "../config.ts";
+import { resolve } from "node:path";
 import { isAuthorized } from "../auth.ts";
+import type { ProjectConfig } from "../config.ts";
+import { checkUploadPolicy, contentTypeOf } from "../content-type.ts";
 import { resolveUnderStaticDir, sanitizePath } from "../paths.ts";
-import { checkUploadPolicy, extOf } from "../content-type.ts";
-import type { UploadDeps } from "./upload.ts";
 import {
 	IdleTimeoutError,
 	IncompleteBodyError,
-	saveStreamAtomic,
 	SizeLimitError,
+	saveStreamAtomic,
 } from "../storage.ts";
+import type { UploadDeps } from "./upload.ts";
 
 /** Same partial-failure envelope as the POST handler, for a single file. */
 function rejectedJson(name: string, reason: string, status: number): Response {
@@ -71,7 +70,7 @@ export async function handlePut(
 
 	// Advisory pre-check on the declared length — rejects an oversized upload
 	// before reading it. Client-supplied, so the mid-stream cap below stays
-	// authoritative. (Deno's fetch sends streamed bodies chunked, without
+	// authoritative. (A `fetch` with a streamed body sends it chunked, without
 	// Content-Length; curl-style clients declare it.)
 	const declared = Number(req.headers.get("content-length") ?? NaN);
 	const hasDeclared = Number.isFinite(declared) && declared >= 0;
@@ -84,7 +83,7 @@ export async function handlePut(
 	// request Content-Type header — so the check matches what GET will later
 	// serve and cannot be satisfied by header spoofing. Size 0: the byte size
 	// is unknown until the body is consumed; the stream cap enforces it.
-	const derivedMime = contentType(extOf(safePath)) ?? "";
+	const derivedMime = contentTypeOf(safePath) ?? "";
 	const policyError = checkUploadPolicy(
 		{ ...config, maxFileSize: maxBytes },
 		safePath,

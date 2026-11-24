@@ -1,9 +1,10 @@
-import { resolve } from "@std/path";
-import type { ProjectConfig } from "../config.ts";
+import { stat, unlink } from "node:fs/promises";
+import { resolve } from "node:path";
 import { isAuthorized } from "../auth.ts";
 import type { CdnAdapter } from "../cdn.ts";
-import { resolveUnderStaticDir, sanitizePath } from "../paths.ts";
+import type { ProjectConfig } from "../config.ts";
 import type { Logger } from "../logger.ts";
+import { resolveUnderStaticDir, sanitizePath } from "../paths.ts";
 
 interface DeleteDeps {
 	globalToken?: string;
@@ -50,15 +51,15 @@ export async function handleDelete(
 	}
 
 	try {
-		const stat = await Deno.stat(destPath);
-		if (!stat.isFile) {
+		const info = await stat(destPath);
+		if (!info.isFile()) {
 			return new Response("Not a file", { status: 400 });
 		}
 	} catch {
 		return new Response("Not found", { status: 404 });
 	}
 
-	await Deno.remove(destPath);
+	await unlink(destPath);
 
 	const deletedPath = `/${projectId}/${safePath}`;
 	if (cdn) {

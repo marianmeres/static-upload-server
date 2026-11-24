@@ -1,24 +1,25 @@
-import { assertEquals } from "@std/assert";
+import assert from "node:assert/strict";
+import { test } from "node:test";
 import { timingSafeEqualStr } from "../src/auth.ts";
 
-Deno.test("timingSafeEqualStr: equal strings match", () => {
-	assertEquals(timingSafeEqualStr("hello", "hello"), true);
+test("timingSafeEqualStr: equal strings match", () => {
+	assert.deepStrictEqual(timingSafeEqualStr("hello", "hello"), true);
 });
 
-Deno.test("timingSafeEqualStr: different strings do not match", () => {
-	assertEquals(timingSafeEqualStr("hello", "world"), false);
+test("timingSafeEqualStr: different strings do not match", () => {
+	assert.deepStrictEqual(timingSafeEqualStr("hello", "world"), false);
 });
 
-Deno.test("timingSafeEqualStr: different lengths do not match", () => {
-	assertEquals(timingSafeEqualStr("hello", "hello!"), false);
-	assertEquals(timingSafeEqualStr("hello!", "hello"), false);
+test("timingSafeEqualStr: different lengths do not match", () => {
+	assert.deepStrictEqual(timingSafeEqualStr("hello", "hello!"), false);
+	assert.deepStrictEqual(timingSafeEqualStr("hello!", "hello"), false);
 });
 
-Deno.test("timingSafeEqualStr: empty strings match", () => {
-	assertEquals(timingSafeEqualStr("", ""), true);
+test("timingSafeEqualStr: empty strings match", () => {
+	assert.deepStrictEqual(timingSafeEqualStr("", ""), true);
 });
 
-Deno.test("timingSafeEqualStr: one-char diff at start or end", () => {
-	assertEquals(timingSafeEqualStr("Xbcdef", "abcdef"), false);
-	assertEquals(timingSafeEqualStr("abcdeX", "abcdef"), false);
+test("timingSafeEqualStr: one-char diff at start or end", () => {
+	assert.deepStrictEqual(timingSafeEqualStr("Xbcdef", "abcdef"), false);
+	assert.deepStrictEqual(timingSafeEqualStr("abcdeX", "abcdef"), false);
 });

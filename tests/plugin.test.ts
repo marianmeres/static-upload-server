@@ -1,19 +1,21 @@
-import { assertEquals, assertRejects } from "@std/assert";
-import { join } from "@std/path";
-import { clearConfigCache } from "../src/server.ts";
+import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { test } from "node:test";
 import { clearPluginCache, loadPlugin } from "../src/plugin.ts";
-import { BASE, cleanup, createHandler } from "./_helpers.ts";
+import { clearConfigCache } from "../src/server.ts";
+import { BASE, cleanup, createHandler, makeTempDir } from "./_helpers.ts";
 
 async function setupWithPlugin(
 	projectId: string,
 	pluginSource: string,
 	extraConfig: Record<string, unknown> = {},
 ): Promise<{ staticDir: string; configDir: string; pluginPath: string }> {
-	const staticDir = await Deno.makeTempDir();
-	const configDir = await Deno.makeTempDir();
+	const staticDir = await makeTempDir();
+	const configDir = await makeTempDir();
 	const pluginPath = join(configDir, `${projectId}.plugin.ts`);
-	await Deno.writeTextFile(pluginPath, pluginSource);
-	await Deno.writeTextFile(
+	await writeFile(pluginPath, pluginSource);
+	await writeFile(
 		join(configDir, `${projectId}.json`),
 		JSON.stringify({
 			uploadTokens: [],
@@ -28,7 +30,7 @@ async function setupWithPlugin(
 
 // ─── Plugin handler basics ──────────────────────────────────────────
 
-Deno.test("plugin: handles request when returning Response", async () => {
+test("plugin: handles request when returning Response", async () => {
 	const { staticDir, configDir } = await setupWithPlugin(
 		"p",
 		`export default async (_req, _ctx) => new Response("from-plugin", { status: 201 });`,
@@ -36,14 +38,14 @@ Deno.test("plugin: handles request when returning Response", async () => {
 	try {
 		const handler = await createHandler({ staticDir, configDir });
 		const res = await handler(new Request(`${BASE}/p`));
-		assertEquals(res.status, 201);
-		assertEquals(await res.text(), "from-plugin");
+		assert.deepStrictEqual(res.status, 201);
+		assert.deepStrictEqual(await res.text(), "from-plugin");
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("plugin: returning null falls through to default handler", async () => {
+test("plugin: returning null falls through to default handler", async () => {
 	const { staticDir, configDir } = await setupWithPlugin(
 		"p",
 		`export default async (_req, _ctx) => null;`,
@@ -52,8 +54,8 @@ Deno.test("plugin: returning null falls through to default handler", async () =>
 		const handler = await createHandler({ staticDir, configDir });
 		const res = await handler(new Request(`${BASE}/p`));
 		// default form is enabled
-		assertEquals(res.status, 200);
-		assertEquals(
+		assert.deepStrictEqual(res.status, 200);
+		assert.deepStrictEqual(
 			res.headers.get("content-type"),
 			"text/html; charset=utf-8",
 		);
@@ -63,7 +65,7 @@ Deno.test("plugin: returning null falls through to default handler", async () =>
 	}
 });
 
-Deno.test("plugin: throwing plugin returns 500", async () => {
+test("plugin: throwing plugin returns 500", async () => {
 	const { staticDir, configDir } = await setupWithPlugin(
 		"p",
 		`export default async (_req, _ctx) => { throw new Error("boom"); };`,
@@ -71,7 +73,7 @@ Deno.test("plugin: throwing plugin returns 500", async () => {
 	try {
 		const handler = await createHandler({ staticDir, configDir });
 		const res = await handler(new Request(`${BASE}/p`));
-		assertEquals(res.status, 500);
+		assert.deepStrictEqual(res.status, 500);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
@@ -79,13 +81,13 @@ Deno.test("plugin: throwing plugin returns 500", async () => {
 
 // ─── Plugin sandboxing ──────────────────────────────────────────────
 
-Deno.test("plugin: path resolving outside configDir is rejected", async () => {
-	const configDir = await Deno.makeTempDir();
+test("plugin: path resolving outside configDir is rejected", async () => {
+	const configDir = await makeTempDir();
 	try {
-		await assertRejects(
+		await assert.rejects(
 			() => loadPlugin(configDir, "../../etc/passwd.ts"),
-			Error,
-			"must resolve inside configDir",
+			(e: unknown) =>
+				e instanceof Error && e.message.includes("must resolve inside configDir"),
 		);
 	} finally {
 		await cleanup(configDir);

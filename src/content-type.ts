@@ -1,4 +1,19 @@
+import { extname } from "node:path";
+import { contentType } from "mime-types";
 import type { ProjectConfig } from "./config.ts";
+
+/**
+ * `Content-Type` for a file name or path, by the extension of its last segment
+ * (text and JSON types carry a charset). `undefined` when the extension is
+ * missing or unknown.
+ *
+ * One lookup for both directions: GET serves a file under this type and the PUT
+ * policy check derives a file's MIME from it, so the two cannot disagree.
+ */
+export function contentTypeOf(filename: string): string | undefined {
+	const ext = extname(filename);
+	return (ext && contentType(ext)) || undefined;
+}
 
 /** Lowercased extension without leading dot. "" if none. */
 export function extOf(filename: string): string {
@@ -30,10 +45,7 @@ export function checkUploadPolicy(
 	mime: string,
 	size: number,
 ): string | null {
-	if (
-		config.maxFileSize !== undefined &&
-		size > config.maxFileSize
-	) {
+	if (config.maxFileSize !== undefined && size > config.maxFileSize) {
 		return `File exceeds maxFileSize (${config.maxFileSize})`;
 	}
 	if (config.allowedExtensions && config.allowedExtensions.length > 0) {

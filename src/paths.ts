@@ -1,4 +1,4 @@
-import { join, relative, resolve } from "@std/path";
+import { join, relative, resolve } from "node:path";
 
 /**
  * Sanitize a user-supplied relative path into `segment/segment/...`:
@@ -19,7 +19,7 @@ export function sanitizePath(filePath: string): string {
  * Resolve a project-scoped file path to an absolute path anchored inside
  * absStaticDir. Returns null if the resolved path escapes absStaticDir.
  *
- * Uses @std/path `relative()` for a robust, platform-safe boundary check.
+ * Uses `node:path`'s `relative()` for a robust, platform-safe boundary check.
  */
 export function resolveUnderStaticDir(
 	absStaticDir: string,

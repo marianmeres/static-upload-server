@@ -61,22 +61,17 @@ export class CloudflareCdnAdapter implements CdnAdapter {
 		const files = paths.map((p) => this.#purgeUrlPrefix + p);
 
 		try {
-			const res = await fetch(
-				`${CF_API_BASE}/zones/${this.#zoneId}/purge_cache`,
-				{
-					method: "POST",
-					headers: {
-						"Authorization": `Bearer ${this.#apiToken}`,
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({ files }),
+			const res = await fetch(`${CF_API_BASE}/zones/${this.#zoneId}/purge_cache`, {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${this.#apiToken}`,
+					"Content-Type": "application/json",
 				},
-			);
+				body: JSON.stringify({ files }),
+			});
 			if (!res.ok) {
 				const body = await res.text();
-				console.error(
-					`[cdn:cloudflare] purge failed (${res.status}): ${body}`,
-				);
+				console.error(`[cdn:cloudflare] purge failed (${res.status}): ${body}`);
 			}
 		} catch (e) {
 			console.error("[cdn:cloudflare] purge error:", e);

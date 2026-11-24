@@ -1,4 +1,5 @@
-import { join } from "@std/path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 /** Access control mode for GET requests. */
 export type GetAccessControl = "public" | "token" | "jwt";
@@ -12,9 +13,7 @@ export type CacheStrategy = "mutable" | "immutable";
  * request path inside the project static dir (e.g. `/img/abc.jpg`); a bare
  * `*` or `/` is the fallback for unmatched paths. Longest matching prefix wins.
  */
-export type CacheStrategyConfig =
-	| CacheStrategy
-	| Record<string, CacheStrategy>;
+export type CacheStrategyConfig = CacheStrategy | Record<string, CacheStrategy>;
 
 /** JWT configuration for a project. */
 export interface JwtConfig {
@@ -136,9 +135,9 @@ export async function loadProjectConfig(
 
 	let raw: string;
 	try {
-		raw = await Deno.readTextFile(configPath);
+		raw = await readFile(configPath, "utf8");
 	} catch (e) {
-		if (e instanceof Deno.errors.NotFound) return null;
+		if ((e as NodeJS.ErrnoException | null)?.code === "ENOENT") return null;
 		throw e;
 	}
 
@@ -146,16 +145,10 @@ export async function loadProjectConfig(
 	try {
 		parsed = JSON.parse(raw);
 	} catch {
-		throw new Error(
-			`Invalid JSON in project config (projectId="${projectId}")`,
-		);
+		throw new Error(`Invalid JSON in project config (projectId="${projectId}")`);
 	}
 
-	if (
-		typeof parsed !== "object" ||
-		parsed === null ||
-		Array.isArray(parsed)
-	) {
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
 		throw new Error(
 			`Project config must be a JSON object (projectId="${projectId}")`,
 		);
@@ -246,32 +239,30 @@ export async function loadProjectConfig(
 			: undefined,
 		// Only set when explicitly provided in the JSON. Leaving it undefined
 		// lets the server-level default apply without being silently overridden.
-		enableUploadForm: typeof config.enableUploadForm === "boolean"
-			? config.enableUploadForm
-			: undefined,
-		enableDelete: typeof config.enableDelete === "boolean"
-			? config.enableDelete
-			: undefined,
+		enableUploadForm:
+			typeof config.enableUploadForm === "boolean"
+				? config.enableUploadForm
+				: undefined,
+		enableDelete:
+			typeof config.enableDelete === "boolean" ? config.enableDelete : undefined,
 		plugin: typeof config.plugin === "string" ? config.plugin : undefined,
-		getAccessControl: config.getAccessControl === "token" ||
-				config.getAccessControl === "jwt"
-			? config.getAccessControl
-			: "public",
+		getAccessControl:
+			config.getAccessControl === "token" || config.getAccessControl === "jwt"
+				? config.getAccessControl
+				: "public",
 		cacheStrategy,
-		maxFileSize: typeof config.maxFileSize === "number"
-			? config.maxFileSize
-			: undefined,
+		maxFileSize:
+			typeof config.maxFileSize === "number" ? config.maxFileSize : undefined,
 		allowedExtensions: Array.isArray(config.allowedExtensions)
 			? (config.allowedExtensions as string[]).map((e) =>
-				e.toLowerCase().replace(/^\./, "")
-			)
+					e.toLowerCase().replace(/^\./, ""),
+				)
 			: undefined,
 		allowedMimeTypes: Array.isArray(config.allowedMimeTypes)
 			? (config.allowedMimeTypes as string[]).map((m) => m.toLowerCase())
 			: undefined,
-		forceDownload: typeof config.forceDownload === "boolean"
-			? config.forceDownload
-			: undefined,
+		forceDownload:
+			typeof config.forceDownload === "boolean" ? config.forceDownload : undefined,
 	};
 
 	// JWT config

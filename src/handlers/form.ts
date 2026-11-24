@@ -1,11 +1,13 @@
+import { readFile } from "node:fs/promises";
 import type { ProjectConfig } from "../config.ts";
 
 let uploadHtmlPromise: Promise<string> | null = null;
 
 function loadUploadHtml(): Promise<string> {
 	if (!uploadHtmlPromise) {
-		uploadHtmlPromise = fetch(new URL("../upload.html", import.meta.url))
-			.then((r) => r.text());
+		// `src/upload.html` in a checkout, `dist/upload.html` in the built package
+		// (the build copies it beside the emitted JS).
+		uploadHtmlPromise = readFile(new URL("../upload.html", import.meta.url), "utf8");
 	}
 	return uploadHtmlPromise;
 }

@@ -1,6 +1,6 @@
 # @marianmeres/deno-static-upload-server
 
-[![JSR](https://jsr.io/badges/@marianmeres/deno-static-upload-server)](https://jsr.io/@marianmeres/deno-static-upload-server)
+[![NPM](https://img.shields.io/npm/v/@marianmeres/deno-static-upload-server)](https://www.npmjs.com/package/@marianmeres/deno-static-upload-server)
 [![License](https://img.shields.io/github/license/marianmeres/deno-static-upload-server)](LICENSE)
 
 A lightweight, self-hosted static file server with upload endpoint and per-project configuration. Built for a reliable home for static assets without the complexity of a full cloud storage setup.
@@ -9,7 +9,7 @@ A lightweight, self-hosted static file server with upload endpoint and per-proje
 
 - **Per-project configuration** — each project gets its own JSON config with independent auth tokens
 - **Upload endpoints** — `multipart/form-data` POST for the browser form, and a raw-body streaming PUT for machine clients and large files (constant memory, any size)
-- **Static file serving** — via `@std/http/file-server` (range requests, content types, caching headers)
+- **Static file serving** — range requests, conditional requests (`ETag` / `Last-Modified`), content types by extension
 - **Delete endpoint** — remove uploaded files (requires auth)
 - **Plugin architecture** — custom handlers per project, sandboxed to configDir
 - **JWT support** — HS256 token verification (Web Crypto, zero-dep)
@@ -21,7 +21,7 @@ A lightweight, self-hosted static file server with upload endpoint and per-proje
 - **Upload policies** — per-project `maxFileSize`, `allowedExtensions`, `allowedMimeTypes`, `forceDownload`
 - **Hardened serving** — `X-Content-Type-Options: nosniff` always on; CORS off for auth-protected content
 - **Structured logging** — pluggable `Logger` interface with a JSON-line default
-- **Zero dependencies** — just Deno standard library
+- **Runs on Node** — two runtime dependencies: [`@marianmeres/demino`](https://github.com/marianmeres/demino) (HTTP layer and file serving) and `mime-types`
 
 ## Quick start
 
@@ -34,17 +34,24 @@ echo '{"uploadTokens": ["my-secret-token"]}' > config/my-app.json
 
 ### 2. Run the server
 
+Requires Node 24.12 or newer. (Coming from the Deno-based 1.x? See the
+[breaking changes](API.md#breaking-changes-from-170).)
+
 ```bash
 PORT=8000 \
 STATIC_DIR=./static \
 CONFIG_DIR=./config \
-deno run -A jsr:@marianmeres/deno-static-upload-server
+npx @marianmeres/deno-static-upload-server
 ```
 
 ### Programmatic usage
 
+```bash
+npm install @marianmeres/deno-static-upload-server
+```
+
 ```ts
-import { createServer } from "jsr:@marianmeres/deno-static-upload-server/server";
+import { createServer } from "@marianmeres/deno-static-upload-server";
 
 const server = await createServer({
 	port: 8000,
@@ -53,7 +60,7 @@ const server = await createServer({
 	logger: true, // JSON-line logs to stderr
 });
 
-server.start();
+await server.start();
 ```
 
 ## Configuration
@@ -62,7 +69,7 @@ server.start();
 
 | Option             | Env var                | Default    | Description                                                             |
 | ------------------ | ---------------------- | ---------- | ----------------------------------------------------------------------- |
-| `port`             | `PORT`                 | `8000`     | Port to listen on                                                       |
+| `port`             | `PORT`                 | `8000`     | Port to listen on (`0` = a free port, printed at startup)               |
 | `staticDir`        | `STATIC_DIR`           | `./static` | Root directory for stored files                                         |
 | `configDir`        | `CONFIG_DIR`           | `./config` | Directory for per-project JSON configs                                  |
 | `enableUploadForm` | `ENABLE_UPLOAD_FORM`   | `true`     | Server default for upload form                                          |
@@ -107,9 +114,14 @@ Set `GLOBAL_TOKEN` to define a superuser token accepted for uploads, deletes, an
 
 ### Using a `.env` file
 
+Node loads it with `--env-file`. With the package installed locally:
+
 ```bash
-deno run --env=.env -A jsr:@marianmeres/deno-static-upload-server
+node --env-file=.env node_modules/.bin/deno-static-upload-server
 ```
+
+From a checkout of this repository it is `node --env-file=.env src/cli.ts`.
+Docker Compose reads `.env` on its own.
 
 ## API
 
@@ -154,7 +166,7 @@ If one or more files are rejected by policy (size/extension/MIME), the response 
 All-rejected responses return `413` when size was the only reason, `500` when all rejections were write failures, otherwise `400`.
 
 > **Memory note:** parsing multipart buffers the whole request body in RAM
-> (~3–3.5× the file size at peak, per concurrent upload). POST is meant for the
+> (about 4× the file size at peak, per concurrent upload). POST is meant for the
 > browser form and small files — for large files or machine clients, use PUT.
 
 ### Upload a file (streaming PUT)
@@ -176,7 +188,7 @@ curl -T backup.sql.gz \
 ```
 
 `size` is the number of bytes stored — clients streaming without a
-`Content-Length` (e.g. Deno/browser `fetch`) should verify it against the
+`Content-Length` (e.g. a `fetch` with a streamed body) should verify it against the
 source file size. See [API.md](API.md) for status codes and details.
 
 ### Delete a file
@@ -241,6 +253,12 @@ export default async function (req, ctx) {
 Reference it in your project config: `"plugin": "./plugins/my-project.ts"`.
 
 Plugin paths must resolve inside `configDir` (enforced at load time).
+
+Node loads the module as is, with its types stripped. So a plugin may be
+TypeScript, but only syntax that erases cleanly: no `enum`, `namespace` or
+constructor parameter properties. It can import other files by relative path and
+Node built-ins (`node:fs`, …); a bare package import resolves from the plugin's
+own directory, so it needs a `node_modules` there or above it.
 
 ## Token rotation (zero downtime)
 

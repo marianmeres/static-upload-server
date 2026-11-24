@@ -2,23 +2,24 @@
 
 ## Quick Reference
 
-- **Stack**: Deno, TypeScript, `@std/http`, `@std/path`
-- **Test**: `deno task test`
-- **Dev**: `deno task dev`
-- **Example**: `deno task example` (loads `.env.example`)
-- **Format**: `deno fmt` (tabs, 90-char lines, indent 4)
-- **Typecheck**: `deno check src/**/*.ts`
+- **Stack**: Node (>= 24.12, `.node-version` 26), TypeScript run as is (erasable syntax only), pnpm, Biome. Runtime deps: `@marianmeres/demino` (`serve` from `/node`, `serveStatic`), `mime-types`
+- **Gate**: `pnpm run ci` (typecheck + lint + test + smoke)
+- **Test**: `pnpm test` (`node:test`, `node:assert/strict`)
+- **Typecheck**: `pnpm run typecheck` (Node never checks types; this is the type gate)
+- **Lint / format**: `pnpm run lint` / `pnpm run format` (Biome: tabs, 90-char lines, indent 4)
+- **Build**: `pnpm run build` (`tsc` to `dist/` + copies `src/upload.html`); **Smoke**: `pnpm run smoke` (packs, npm-installs, runs the bin from `dist/`)
+- **Dev**: `pnpm run dev` | **Example**: `pnpm run example` (loads `.env.example`)
 
 ## Project Structure
 
 ```
 src/server.ts          — createServer(), handler, StaticServerOptions
-src/cli.ts             — CLI entry (reads env vars, calls createServer)
+src/cli.ts             — CLI entry and npm `bin` (reads env vars, calls createServer, stops on SIGTERM/SIGINT)
 src/config.ts          — ProjectConfig, loadProjectConfig(), cache (keyed by configDir+projectId)
 src/auth.ts            — isAuthorized(), extractBearerToken(), timingSafeEqualStr()
 src/jwt.ts             — HS256 JWT verification (Web Crypto); `typ` is optional per RFC 7519
-src/paths.ts           — sanitizePath(), resolveUnderStaticDir() (uses @std/path `relative()`)
-src/content-type.ts    — extOf(), mimeMatches(), checkUploadPolicy() (size/ext/mime gates)
+src/paths.ts           — sanitizePath(), resolveUnderStaticDir() (uses node:path `relative()`)
+src/content-type.ts    — contentTypeOf() (the one MIME lookup, `mime-types`), extOf(), mimeMatches(), checkUploadPolicy() (size/ext/mime gates)
 src/storage.ts         — saveStreamAtomic(), writeWithLimit(), typed errors (SizeLimit/IncompleteBody/IdleTimeout)
 src/logger.ts          — Logger interface, defaultLogger(), silentLogger
 src/plugin.ts          — PluginHandler, PluginContext, loadPlugin() (sandboxed to configDir)
@@ -28,28 +29,35 @@ src/cache-strategy.ts  — resolveCacheStrategy(cfg, filePath) (longest-prefix l
 src/handlers/form.ts   — GET /:projectId (upload form, lazy-loads HTML)
 src/handlers/upload.ts — POST /:projectId (multipart; buffers via req.formData(), then streaming write with byte cap, partial-failure reporting)
 src/handlers/put.ts    — PUT /:projectId/* (raw body streamed socket→disk, O(1) memory; for large/machine uploads)
-src/handlers/serve.ts  — GET/HEAD /:projectId/* (nosniff, forceDownload, CORS off for protected)
+src/handlers/serve.ts  — GET/HEAD /:projectId/* (demino `serveStatic`; nosniff, forceDownload, CORS off for protected)
 src/handlers/delete.ts — DELETE /:projectId/*
 src/upload.html        — Upload form template
 tests/_helpers.ts      — Shared test utilities
-tests/*.test.ts        — auth, auth_timing, cache, cache-strategy, cdn, config, delete, hardening, jwt, plugin, policy, put, serve, upload
+tests/*.test.ts        — auth, auth_timing, cache, cache-strategy, cdn, config, delete, hardening, jwt, plugin, policy, put, serve, sweep, upload: all call `handler(req)` directly
+tests/wire.test.ts     — the same server through `start()` on a free port and real sockets (streamed bodies, refused / stalled / abandoned uploads)
+tests/cli.test.ts      — `node src/cli.ts` as a subprocess (`PORT=0`, SIGTERM)
 example/main.ts        — Example usage
 scripts/memcheck.ts    — Measure server RSS for a large upload (post vs put mode)
+scripts/smoke-npm.ts   — Pack, npm-install into a temp project, run the bin and the library from `dist/`
 .env.example           — Example env config
 ```
 
-## Exports (deno.json)
+## Exports (package.json)
 
-| Specifier    | File            | Purpose                       |
-| ------------ | --------------- | ----------------------------- |
-| `"."`        | `src/cli.ts`    | CLI entry (default, runnable) |
-| `"./server"` | `src/server.ts` | Programmatic API              |
+| Entry        | File (source → published)          | Purpose                         |
+| ------------ | ---------------------------------- | ------------------------------- |
+| `"."`        | `src/server.ts` → `dist/server.js` | Programmatic API                |
+| `"./server"` | `src/server.ts` → `dist/server.js` | Same module (the 1.x specifier) |
+| `bin`        | `src/cli.ts` → `dist/cli.js`       | CLI (`npx <package>`)           |
+
+npm publishes `dist/` only. A checkout and the Docker image run `src/*.ts` directly (`node src/cli.ts`), with no build.
 
 ## Programmatic API
 
 - `createServer(opts)` → `Promise<{ handler, start, version }>`. **async** (CDN adapter init, version read).
+- `start()` → `Promise<ServeHandle>` (demino's: `port`, `hostname`, `url`, `shutdown()`, `finished`, `ref()`, `unref()`). Resolves once bound; `port: 0` binds a free port.
 - `clearConfigCache(configDir?)` — clear all, or only entries for a given configDir.
-- Types re-exported from `server`: `CdnAdapter`, `CdnOptions`, `Logger`, `PluginContext`, `ProjectConfig`, `StaticServerOptions`.
+- Types re-exported from `server`: `CdnAdapter`, `CdnOptions`, `Logger`, `PluginContext`, `ProjectConfig`, `ServeHandle`, `StaticServerOptions`.
 
 ## Configuration
 
@@ -57,7 +65,7 @@ scripts/memcheck.ts    — Measure server RSS for a large upload (post vs put mo
 
 | Field                 | Type                  | Default                 | Notes                                                                                  |
 | --------------------- | --------------------- | ----------------------- | -------------------------------------------------------------------------------------- |
-| `port`                | `number`              | `8000`                  |                                                                                        |
+| `port`                | `number`              | `8000`                  | `0` = a free port (the banner and the `start()` handle report the real one)            |
 | `staticDir`           | `string`              | `"./static"`            |                                                                                        |
 | `configDir`           | `string`              | `"./config"`            |                                                                                        |
 | `enableUploadForm`    | `boolean`             | `true`                  | Server-level default; per-project `enableUploadForm` overrides                         |
@@ -84,23 +92,26 @@ scripts/memcheck.ts    — Measure server RSS for a large upload (post vs put mo
 | `cacheStrategy`     | `CacheStrategyConfig`          | `"mutable"` | Scalar (`"mutable"`/`"immutable"`) **or** `Record<prefix, strategy>` for per-subpath control. Longest matching prefix wins; `*`/`/` is the fallback bucket. Resolved per request by `resolveCacheStrategy` ([src/cache-strategy.ts](src/cache-strategy.ts)) before being passed to `CdnAdapter.applyCacheHeaders`. |
 | `maxFileSize`       | `number`                       | —           | Bytes; per-file cap. Oversize → `413` with `rejected`. When unset, server-level `maxUploadSize` applies.                                                                                                                                                                                                           |
 | `allowedExtensions` | `string[]`                     | —           | Lowercase, no dot. Non-match → `400` with `rejected`.                                                                                                                                                                                                                                                              |
-| `allowedMimeTypes`  | `string[]`                     | —           | Exact or `type/*` wildcard. Non-match → `400` with `rejected`. POST checks the client-declared per-part type; PUT derives the MIME from the file extension (`@std/media-types`) so headers can't spoof it.                                                                                                         |
+| `allowedMimeTypes`  | `string[]`                     | —           | Exact or `type/*` wildcard. Non-match → `400` with `rejected`. POST checks the client-declared per-part type; PUT derives the MIME from the file extension (`contentTypeOf`, the lookup GET serves with) so headers can't spoof it.                                                                                |
 | `forceDownload`     | `boolean`                      | `false`     | Adds `Content-Disposition: attachment` on served files                                                                                                                                                                                                                                                             |
 
 ## Key Patterns
 
-- **Atomic streaming writes**: both upload routes go through `saveStreamAtomic` ([src/storage.ts](src/storage.ts)) — mkdir, write to `.tmp_<uuid>` with the byte cap enforced mid-stream, rename on success, remove tmp + typed error on failure. NOTE the asymmetry: PUT streams the socket straight to disk (O(1) memory), while POST's `req.formData()` buffers the parsed multipart body in RAM (~3-3.5× file size peak) before the disk write — large/machine uploads should use PUT.
-- **Effective size cap**: `config.maxFileSize ?? maxUploadSize` (server option, default 2 GiB, `0` = unlimited). PUT also pre-checks a declared `Content-Length` (413 before reading) and rejects a body that ends short of it (400, nothing published); Deno-fetch clients send chunked (no `Content-Length`), so the `size` field in the PUT response is their integrity check.
+- **Atomic streaming writes**: both upload routes go through `saveStreamAtomic` ([src/storage.ts](src/storage.ts)) — mkdir, write to `.tmp_<uuid>` with the byte cap enforced mid-stream, rename on success, remove tmp + typed error on failure. NOTE the asymmetry: PUT streams the socket straight to disk (O(1) memory), while POST's `req.formData()` buffers the parsed multipart body in RAM (about 4× file size peak, measured with `scripts/memcheck.ts`) before the disk write — large/machine uploads should use PUT.
+- **Effective size cap**: `config.maxFileSize ?? maxUploadSize` (server option, default 2 GiB, `0` = unlimited). PUT also pre-checks a declared `Content-Length` (413 before reading) and rejects a body that ends short of it (400, nothing published); a `fetch` with a streamed body sends it chunked (no `Content-Length`), so the `size` field in the PUT response is such a client's integrity check.
 - **Partial success reporting**: upload response is `{ uploaded, rejected? }` (PUT adds `size` = bytes written). `rejected` is `[{ name, reason }]` if any files were skipped. All-rejected → `413` (size-only), `500` (write-failure-only), or `400`.
-- **Unhandled request errors**: the exported `handler` wraps routing in try/catch — logs `request.unhandled` (method, path, stack) and returns a generic 500; `start()` additionally passes `onError` to `Deno.serve` for errors outside the handler. Response body stays byte-identical to Deno's default (`"Internal Server Error"`).
+- **Unhandled request errors**: the exported `handler` wraps routing in try/catch — logs `request.unhandled` (method, path, stack) and returns a generic 500; `start()` additionally passes `onError` to the adapter's `serve()` for errors outside the handler. Response body is the plain-text `"Internal Server Error"`.
 - **CDN purge is fire-and-forget** (`queueMicrotask`): response is not blocked on CDN round-trip. `CdnAdapter.purgeCache` contract: must never throw.
 - **Per-prefix cache strategy**: `cacheStrategy` accepts a `{ prefix: "mutable" | "immutable" }` map alongside the scalar form. `normalizeCacheStrategy` ([src/config.ts](src/config.ts)) strips trailing `*` and stores the fallback (`*` / `/` / `""` / `/*`) as `""`. The serve handler resolves once per request with the project-relative path (`"/" + filePath`).
 - **Hardening headers** on all served files: `X-Content-Type-Options: nosniff` (always), `Content-Disposition: attachment` (if `forceDownload`).
 - **CORS**: enabled only for fully public GETs. Disabled when `downloadTokens` set OR `getAccessControl` is `"token"` / `"jwt"`.
 - **Timing-safe token comparison** (`timingSafeEqualStr`): walks full `expected.length`, XOR-accumulates diff, compares once at end.
-- **Path boundary**: `resolveUnderStaticDir()` uses `@std/path` `relative()` instead of string `startsWith`.
-- **Plugin sandbox**: `loadPlugin` rejects paths that resolve outside configDir; imports via `toFileUrl` for cross-platform safety.
-- **Lazy module loads**: `deno.json` (for version) and `src/upload.html` are loaded on first use, not at import time.
+- **Path boundary**: `resolveUnderStaticDir()` uses `node:path`'s `relative()` instead of string `startsWith`.
+- **Plugin sandbox**: `loadPlugin` rejects paths that resolve outside configDir; imports via `pathToFileURL` for cross-platform safety. Node imports the plugin as is: erasable TypeScript only, relative and `node:` imports, no `Deno` global.
+- **Lazy file loads**: `package.json` (for version) and `upload.html` are read on first use, not at import time, both relative to the module (`../package.json`, `../upload.html`). That resolves the same from `src/` and from `dist/`, which is why the build copies `upload.html` into `dist/`.
+- **HTTP layer**: `start()` runs `handler` on demino's Node adapter (`serve`, `webSockets: false`). A request body is the socket as a web stream, so PUT reads it with backpressure. An upload refused before its body was read (401, 413 by `Content-Length`, policy reject) is answered at once and the rest of the body is never read; the server closes that connection when its keep-alive timeout runs out. `tests/wire.test.ts` pins this.
+- **Serving**: `serveStatic` does the file work (Range, `If-Range`, `ETag` / `Last-Modified`, HEAD, `index.html` for a directory, dot-segments 404). `handleServe` overrides its `Content-Type` with `contentTypeOf` (demino's own table lacks vendor types such as `.ico`, `.xlsx`) and adds nosniff, `Content-Disposition` and the CORS headers.
+- **Shutdown**: the CLI handles SIGTERM / SIGINT with `ServeHandle.shutdown()` and exits 0. In the Docker image `node` is PID 1 and gets no default signal action, so without the handler `docker stop` would time out.
 - **Logger**: all handlers receive a `Logger`. `silentLogger` by default. Events: `upload.unauthorized`, `upload.done`, `upload.write_failed`, `upload.idle_timeout`, `delete.unauthorized`, `delete.done`, `serve.unauthorized`, `serve.jwt_not_configured`, `config.load_failed`, `plugin.error`, `cdn.purge_failed`, `tmp.swept`, `request.unhandled`. PUT-originated upload events carry `via: "put"`.
 - **Tmp sweep**: on startup, walks `staticDir`, removes `*.tmp_<uuid>` files older than `tmpSweepMaxAgeMs`. Non-blocking, never throws. The pattern matches the exact `crypto.randomUUID()` shape so stored user files (e.g. `backup.tmp_2026-07-14`) are never swept.
 - **Root files**: `GET /<name>` serves `staticDir/<name>` ONLY for names listed in `opts.rootFiles`. No implicit allow.
@@ -128,11 +139,13 @@ Docker: `PUID`, `PGID`.
 
 ## Critical Conventions
 
-1. Tabs for indentation (`deno fmt` enforces)
-2. No external dependencies — only `@std/*`
-3. Project IDs match `/^[a-zA-Z0-9\-_]+$/`
-4. `uploadTokens` required (empty array = auth disabled)
-5. Plugin paths must resolve inside `configDir`
+1. Tabs for indentation (Biome enforces)
+2. Runtime dependencies are `@marianmeres/demino` and `mime-types`, nothing else without a reason. Web standards first, `node:*` where they don't reach; no `Deno.*` / `Bun.*`, no `jsr:` / `npm:` / `https:` specifiers
+3. Erasable-only TypeScript (no `enum`, `namespace`, parameter properties), `import type` for types, `.ts` extensions in relative imports: Node runs `src/` unbuilt
+4. Project IDs match `/^[a-zA-Z0-9\-_]+$/`
+5. `uploadTokens` required (empty array = auth disabled)
+6. Plugin paths must resolve inside `configDir`
+7. A server a test or script starts itself listens on port `0` (OS-assigned), never a fixed port
 
 ## Breaking Changes (from 1.4.3)
 
@@ -159,9 +172,25 @@ Docker: `PUID`, `PGID`.
 | docker-compose now enables structured logs by default (`LOG=true`)                                                                                      | Set `LOG=false` in `.env` to silence.                                                                                                       |
 | Tmp-sweep pattern tightened to the exact `.tmp_<uuid>` shape                                                                                            | None needed — strictly fewer files match (stored user files are never swept).                                                               |
 
+## Breaking Changes (from 1.7.0)
+
+The move from Deno to Node. The HTTP API (routes, statuses, response bodies) is unchanged.
+
+| Change                                                                                                   | Mitigation                                                                                    |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Runtime is Node >= 24.12; published to npm (JSR stays at 1.7.0)                                          | `npx <package>` replaces `deno run -A jsr:…` / `deno install`; Docker image is `node:26-slim` |
+| Import specifier is the bare package name (`"."`, also `"./server"`)                                     | Replace `jsr:@marianmeres/deno-static-upload-server/server`                                   |
+| `start()` is async and resolves with a `ServeHandle`, not a `Deno.HttpServer`                            | `await start()`; use `handle.port`, `handle.shutdown()`                                       |
+| Plugins are loaded by Node                                                                               | Erasable TypeScript only; no `npm:` / `jsr:` / `https:` imports; no `Deno` global             |
+| Served files: new `ETag` format, unknown extension → `application/octet-stream`, relative 301 `Location` | None needed; clients revalidate once                                                          |
+| GET of a path with malformed percent-encoding is `400` (was `500`)                                       | None needed                                                                                   |
+| The per-request access line GETs printed to stdout is gone                                               | Use the reverse proxy's access log; structured events (`LOG=true`) are unchanged              |
+| `PORT=0` binds a free port (used to fall back to `8000`)                                                 | Unset `PORT` for the default                                                                  |
+
 ## Before Making Changes
 
 - [ ] Read `src/server.ts` — main routing and handler orchestration
-- [ ] Run `deno task test` — all tests must pass
-- [ ] Run `deno fmt` and `deno check src/**/*.ts`
+- [ ] Run `pnpm run ci` — typecheck, lint, tests and the npm smoke must pass
+- [ ] Run `pnpm run format` before committing
 - [ ] For security-adjacent changes, add a test in `tests/hardening.test.ts` or `tests/policy.test.ts`
+- [ ] For anything touching request bodies, connections or `start()`, add a test in `tests/wire.test.ts`: the handler-level tests never reach the HTTP layer

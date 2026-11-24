@@ -1,50 +1,50 @@
-import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { test } from "node:test";
 import { clearConfigCache } from "../src/server.ts";
 import {
 	BASE,
 	cleanup,
 	createHandler,
 	createTestJwt,
+	jsonOf,
+	makeTempDir,
 	makeUploadRequest,
 	setup,
 } from "./_helpers.ts";
 
 // ─── Auth ────────────────────────────────────────────────────────────
 
-Deno.test("auth: no tokens configured = open access", async () => {
+test("auth: no tokens configured = open access", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: [],
 	});
 	try {
 		const handler = await createHandler({ staticDir, configDir });
-		const req = makeUploadRequest("proj", [
-			{ name: "a.txt", content: "hello" },
-		]);
+		const req = makeUploadRequest("proj", [{ name: "a.txt", content: "hello" }]);
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("auth: missing header returns 401", async () => {
+test("auth: missing header returns 401", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["secret"],
 	});
 	try {
 		const handler = await createHandler({ staticDir, configDir });
-		const req = makeUploadRequest("proj", [
-			{ name: "a.txt", content: "hello" },
-		]);
+		const req = makeUploadRequest("proj", [{ name: "a.txt", content: "hello" }]);
 		const res = await handler(req);
-		assertEquals(res.status, 401);
+		assert.deepStrictEqual(res.status, 401);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("auth: wrong token returns 401", async () => {
+test("auth: wrong token returns 401", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["secret"],
 	});
@@ -56,13 +56,13 @@ Deno.test("auth: wrong token returns 401", async () => {
 			"wrong",
 		);
 		const res = await handler(req);
-		assertEquals(res.status, 401);
+		assert.deepStrictEqual(res.status, 401);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("auth: correct token returns 200", async () => {
+test("auth: correct token returns 200", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["secret"],
 	});
@@ -74,21 +74,21 @@ Deno.test("auth: correct token returns 200", async () => {
 			"secret",
 		);
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("auth: per-project token isolation", async () => {
-	const staticDir = await Deno.makeTempDir();
-	const configDir = await Deno.makeTempDir();
+test("auth: per-project token isolation", async () => {
+	const staticDir = await makeTempDir();
+	const configDir = await makeTempDir();
 	clearConfigCache();
-	await Deno.writeTextFile(
+	await writeFile(
 		join(configDir, "app1.json"),
 		JSON.stringify({ uploadTokens: ["token-a"] }),
 	);
-	await Deno.writeTextFile(
+	await writeFile(
 		join(configDir, "app2.json"),
 		JSON.stringify({ uploadTokens: ["token-b"] }),
 	);
@@ -102,7 +102,7 @@ Deno.test("auth: per-project token isolation", async () => {
 			"token-a",
 		);
 		const res1 = await handler(req1);
-		assertEquals(res1.status, 401);
+		assert.deepStrictEqual(res1.status, 401);
 
 		// app2's token works for app2
 		const req2 = makeUploadRequest(
@@ -111,7 +111,7 @@ Deno.test("auth: per-project token isolation", async () => {
 			"token-b",
 		);
 		const res2 = await handler(req2);
-		assertEquals(res2.status, 200);
+		assert.deepStrictEqual(res2.status, 200);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
@@ -119,7 +119,7 @@ Deno.test("auth: per-project token isolation", async () => {
 
 // ─── JWT ────────────────────────────────────────────────────────────
 
-Deno.test("jwt: valid JWT grants access to protected GET", async () => {
+test("jwt: valid JWT grants access to protected GET", async () => {
 	const secret = "test-jwt-secret";
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["secret"],
@@ -144,15 +144,15 @@ Deno.test("jwt: valid JWT grants access to protected GET", async () => {
 			headers: { Authorization: `Bearer ${jwt}` },
 		});
 		const res = await handler(getReq);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 		const text = await res.text();
-		assertEquals(text, "jwt-protected");
+		assert.deepStrictEqual(text, "jwt-protected");
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("jwt: missing JWT on protected GET returns 401", async () => {
+test("jwt: missing JWT on protected GET returns 401", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: [],
 		getAccessControl: "jwt",
@@ -162,13 +162,13 @@ Deno.test("jwt: missing JWT on protected GET returns 401", async () => {
 		const handler = await createHandler({ staticDir, configDir });
 		const req = new Request(`${BASE}/proj/data.txt`);
 		const res = await handler(req);
-		assertEquals(res.status, 401);
+		assert.deepStrictEqual(res.status, 401);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("jwt: token access control on GET", async () => {
+test("jwt: token access control on GET", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["secret"],
 		getAccessControl: "token",
@@ -187,14 +187,14 @@ Deno.test("jwt: token access control on GET", async () => {
 		// GET without token
 		const noAuth = new Request(`${BASE}/proj/data.txt`);
 		const res1 = await handler(noAuth);
-		assertEquals(res1.status, 401);
+		assert.deepStrictEqual(res1.status, 401);
 
 		// GET with valid token
 		const withAuth = new Request(`${BASE}/proj/data.txt`, {
 			headers: { Authorization: "Bearer secret" },
 		});
 		const res2 = await handler(withAuth);
-		assertEquals(res2.status, 200);
+		assert.deepStrictEqual(res2.status, 200);
 		await res2.text();
 	} finally {
 		await cleanup(staticDir, configDir);
@@ -203,7 +203,7 @@ Deno.test("jwt: token access control on GET", async () => {
 
 // ─── Global token ───────────────────────────────────────────────────
 
-Deno.test("global token: works for upload", async () => {
+test("global token: works for upload", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["local"],
 	});
@@ -219,13 +219,13 @@ Deno.test("global token: works for upload", async () => {
 			"master-key",
 		);
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("global token: works for delete", async () => {
+test("global token: works for delete", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["local"],
 	});
@@ -250,15 +250,15 @@ Deno.test("global token: works for delete", async () => {
 			headers: { Authorization: "Bearer master-key" },
 		});
 		const res = await handler(deleteReq);
-		assertEquals(res.status, 200);
-		const body = await res.json();
-		assertEquals(body.deleted, "/proj/del.txt");
+		assert.deepStrictEqual(res.status, 200);
+		const body = await jsonOf(res);
+		assert.deepStrictEqual(body.deleted, "/proj/del.txt");
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("global token: does not enable delete on open project", async () => {
+test("global token: does not enable delete on open project", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: [],
 	});
@@ -281,13 +281,13 @@ Deno.test("global token: does not enable delete on open project", async () => {
 			headers: { Authorization: "Bearer master-key" },
 		});
 		const res = await handler(deleteReq);
-		assertEquals(res.status, 404);
+		assert.deepStrictEqual(res.status, 404);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("global token: wrong token returns 401", async () => {
+test("global token: wrong token returns 401", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["local"],
 	});
@@ -303,13 +303,13 @@ Deno.test("global token: wrong token returns 401", async () => {
 			"wrong-key",
 		);
 		const res = await handler(req);
-		assertEquals(res.status, 401);
+		assert.deepStrictEqual(res.status, 401);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("global token: per-project token still works", async () => {
+test("global token: per-project token still works", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["local"],
 	});
@@ -325,7 +325,7 @@ Deno.test("global token: per-project token still works", async () => {
 			"local",
 		);
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
@@ -333,7 +333,7 @@ Deno.test("global token: per-project token still works", async () => {
 
 // ─── Download tokens ────────────────────────────────────────────────
 
-Deno.test("download tokens: protects GET", async () => {
+test("download tokens: protects GET", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: [],
 		downloadTokens: ["dl-secret"],
@@ -348,13 +348,13 @@ Deno.test("download tokens: protects GET", async () => {
 
 		const req = new Request(`${BASE}/proj/data.txt`);
 		const res = await handler(req);
-		assertEquals(res.status, 401);
+		assert.deepStrictEqual(res.status, 401);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("download tokens: correct token grants access", async () => {
+test("download tokens: correct token grants access", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: [],
 		downloadTokens: ["dl-secret"],
@@ -371,15 +371,15 @@ Deno.test("download tokens: correct token grants access", async () => {
 			headers: { Authorization: "Bearer dl-secret" },
 		});
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 		const text = await res.text();
-		assertEquals(text, "protected");
+		assert.deepStrictEqual(text, "protected");
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("download tokens: wrong token returns 401", async () => {
+test("download tokens: wrong token returns 401", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: [],
 		downloadTokens: ["dl-secret"],
@@ -396,13 +396,13 @@ Deno.test("download tokens: wrong token returns 401", async () => {
 			headers: { Authorization: "Bearer wrong" },
 		});
 		const res = await handler(req);
-		assertEquals(res.status, 401);
+		assert.deepStrictEqual(res.status, 401);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("download tokens: no downloadTokens = public access", async () => {
+test("download tokens: no downloadTokens = public access", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: [],
 	});
@@ -416,15 +416,15 @@ Deno.test("download tokens: no downloadTokens = public access", async () => {
 
 		const req = new Request(`${BASE}/proj/data.txt`);
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 		const text = await res.text();
-		assertEquals(text, "public");
+		assert.deepStrictEqual(text, "public");
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("download tokens: global token bypasses downloadTokens", async () => {
+test("download tokens: global token bypasses downloadTokens", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: [],
 		downloadTokens: ["dl-secret"],
@@ -445,15 +445,15 @@ Deno.test("download tokens: global token bypasses downloadTokens", async () => {
 			headers: { Authorization: "Bearer master-key" },
 		});
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 		const text = await res.text();
-		assertEquals(text, "protected");
+		assert.deepStrictEqual(text, "protected");
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("download tokens: global token bypasses getAccessControl token", async () => {
+test("download tokens: global token bypasses getAccessControl token", async () => {
 	const { staticDir, configDir } = await setup("proj", {
 		uploadTokens: ["secret"],
 		getAccessControl: "token",
@@ -476,7 +476,7 @@ Deno.test("download tokens: global token bypasses getAccessControl token", async
 			headers: { Authorization: "Bearer master-key" },
 		});
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 		await res.text();
 	} finally {
 		await cleanup(staticDir, configDir);

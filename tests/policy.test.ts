@@ -1,9 +1,17 @@
-import { assertEquals } from "@std/assert";
-import { BASE, cleanup, createHandler, makeUploadRequest, setup } from "./_helpers.ts";
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+	BASE,
+	cleanup,
+	createHandler,
+	jsonOf,
+	makeUploadRequest,
+	setup,
+} from "./_helpers.ts";
 
 // ─── maxFileSize ────────────────────────────────────────────────────
 
-Deno.test("policy: maxFileSize rejects oversized file with 413", async () => {
+test("policy: maxFileSize rejects oversized file with 413", async () => {
 	const { staticDir, configDir } = await setup("p", {
 		uploadTokens: [],
 		maxFileSize: 5,
@@ -14,17 +22,17 @@ Deno.test("policy: maxFileSize rejects oversized file with 413", async () => {
 			{ name: "big.txt", content: "abcdefghij" }, // 10 bytes > 5
 		]);
 		const res = await handler(req);
-		assertEquals(res.status, 413);
-		const body = await res.json();
-		assertEquals(body.uploaded, []);
-		assertEquals(body.rejected.length, 1);
-		assertEquals(body.rejected[0].name, "big.txt");
+		assert.deepStrictEqual(res.status, 413);
+		const body = await jsonOf(res);
+		assert.deepStrictEqual(body.uploaded, []);
+		assert.deepStrictEqual(body.rejected.length, 1);
+		assert.deepStrictEqual(body.rejected[0].name, "big.txt");
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("policy: maxFileSize permits files at or under limit", async () => {
+test("policy: maxFileSize permits files at or under limit", async () => {
 	const { staticDir, configDir } = await setup("p", {
 		uploadTokens: [],
 		maxFileSize: 10,
@@ -35,9 +43,9 @@ Deno.test("policy: maxFileSize permits files at or under limit", async () => {
 			{ name: "ok.txt", content: "exactly10!" }, // 10 bytes
 		]);
 		const res = await handler(req);
-		assertEquals(res.status, 200);
-		const body = await res.json();
-		assertEquals(body.uploaded, ["/p/ok.txt"]);
+		assert.deepStrictEqual(res.status, 200);
+		const body = await jsonOf(res);
+		assert.deepStrictEqual(body.uploaded, ["/p/ok.txt"]);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
@@ -45,7 +53,7 @@ Deno.test("policy: maxFileSize permits files at or under limit", async () => {
 
 // ─── allowedExtensions ─────────────────────────────────────────────
 
-Deno.test("policy: allowedExtensions rejects disallowed extension", async () => {
+test("policy: allowedExtensions rejects disallowed extension", async () => {
 	const { staticDir, configDir } = await setup("p", {
 		uploadTokens: [],
 		allowedExtensions: ["png", "jpg"],
@@ -56,27 +64,25 @@ Deno.test("policy: allowedExtensions rejects disallowed extension", async () => 
 			{ name: "evil.html", content: "<script>alert(1)</script>" },
 		]);
 		const res = await handler(req);
-		assertEquals(res.status, 400);
-		const body = await res.json();
-		assertEquals(body.uploaded, []);
-		assertEquals(body.rejected[0].reason.includes("extension"), true);
+		assert.deepStrictEqual(res.status, 400);
+		const body = await jsonOf(res);
+		assert.deepStrictEqual(body.uploaded, []);
+		assert.deepStrictEqual(body.rejected[0].reason.includes("extension"), true);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("policy: allowedExtensions accepts case-insensitive match", async () => {
+test("policy: allowedExtensions accepts case-insensitive match", async () => {
 	const { staticDir, configDir } = await setup("p", {
 		uploadTokens: [],
 		allowedExtensions: ["png"],
 	});
 	try {
 		const handler = await createHandler({ staticDir, configDir });
-		const req = makeUploadRequest("p", [
-			{ name: "photo.PNG", content: "data" },
-		]);
+		const req = makeUploadRequest("p", [{ name: "photo.PNG", content: "data" }]);
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
@@ -84,7 +90,7 @@ Deno.test("policy: allowedExtensions accepts case-insensitive match", async () =
 
 // ─── allowedMimeTypes ───────────────────────────────────────────────
 
-Deno.test("policy: allowedMimeTypes wildcard accepts type/*", async () => {
+test("policy: allowedMimeTypes wildcard accepts type/*", async () => {
 	const { staticDir, configDir } = await setup("p", {
 		uploadTokens: [],
 		allowedMimeTypes: ["image/*"],
@@ -92,19 +98,16 @@ Deno.test("policy: allowedMimeTypes wildcard accepts type/*", async () => {
 	try {
 		const handler = await createHandler({ staticDir, configDir });
 		const formData = new FormData();
-		formData.append(
-			"file",
-			new File(["bytes"], "a.png", { type: "image/png" }),
-		);
+		formData.append("file", new File(["bytes"], "a.png", { type: "image/png" }));
 		const req = new Request(`${BASE}/p`, { method: "POST", body: formData });
 		const res = await handler(req);
-		assertEquals(res.status, 200);
+		assert.deepStrictEqual(res.status, 200);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
 });
 
-Deno.test("policy: allowedMimeTypes rejects mismatch", async () => {
+test("policy: allowedMimeTypes rejects mismatch", async () => {
 	const { staticDir, configDir } = await setup("p", {
 		uploadTokens: [],
 		allowedMimeTypes: ["image/*"],
@@ -112,13 +115,10 @@ Deno.test("policy: allowedMimeTypes rejects mismatch", async () => {
 	try {
 		const handler = await createHandler({ staticDir, configDir });
 		const formData = new FormData();
-		formData.append(
-			"file",
-			new File(["bytes"], "a.txt", { type: "text/plain" }),
-		);
+		formData.append("file", new File(["bytes"], "a.txt", { type: "text/plain" }));
 		const req = new Request(`${BASE}/p`, { method: "POST", body: formData });
 		const res = await handler(req);
-		assertEquals(res.status, 400);
+		assert.deepStrictEqual(res.status, 400);
 	} finally {
 		await cleanup(staticDir, configDir);
 	}
@@ -126,7 +126,7 @@ Deno.test("policy: allowedMimeTypes rejects mismatch", async () => {
 
 // ─── Partial failure reporting ──────────────────────────────────────
 
-Deno.test("upload: partial success includes rejected items", async () => {
+test("upload: partial success includes rejected items", async () => {
 	const { staticDir, configDir } = await setup("p", {
 		uploadTokens: [],
 		maxFileSize: 5,
@@ -138,11 +138,11 @@ Deno.test("upload: partial success includes rejected items", async () => {
 			{ name: "too-big.txt", content: "too-big-content" }, // >5
 		]);
 		const res = await handler(req);
-		assertEquals(res.status, 200);
-		const body = await res.json();
-		assertEquals(body.uploaded, ["/p/ok.txt"]);
-		assertEquals(body.rejected.length, 1);
-		assertEquals(body.rejected[0].name, "too-big.txt");
+		assert.deepStrictEqual(res.status, 200);
+		const body = await jsonOf(res);
+		assert.deepStrictEqual(body.uploaded, ["/p/ok.txt"]);
+		assert.deepStrictEqual(body.rejected.length, 1);
+		assert.deepStrictEqual(body.rejected[0].name, "too-big.txt");
 	} finally {
 		await cleanup(staticDir, configDir);
 	}

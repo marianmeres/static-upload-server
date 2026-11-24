@@ -8,29 +8,32 @@
  * @module
  */
 
-import { resolve } from "@std/path";
-import { clearConfigCache, isValidProjectId, loadProjectConfig } from "./config.ts";
+import { opendir, readFile, stat, unlink } from "node:fs/promises";
+import { resolve } from "node:path";
+import { type ServeHandle, serve } from "@marianmeres/demino/node";
+import type { CdnAdapter, CdnOptions } from "./cdn.ts";
+import { createCdnAdapter, noStoreHeaders } from "./cdn.ts";
 import type { ProjectConfig } from "./config.ts";
+import { clearConfigCache, isValidProjectId, loadProjectConfig } from "./config.ts";
+import { handleDelete } from "./handlers/delete.ts";
 import { handleForm } from "./handlers/form.ts";
-import { handleUpload } from "./handlers/upload.ts";
 import { handlePut } from "./handlers/put.ts";
 import { handleServe } from "./handlers/serve.ts";
-import { handleDelete } from "./handlers/delete.ts";
-import { loadPlugin } from "./plugin.ts";
-import type { PluginContext } from "./plugin.ts";
-import { createCdnAdapter, noStoreHeaders } from "./cdn.ts";
-import type { CdnAdapter, CdnOptions } from "./cdn.ts";
-import { defaultLogger, silentLogger } from "./logger.ts";
+import { handleUpload } from "./handlers/upload.ts";
 import type { Logger } from "./logger.ts";
+import { defaultLogger, silentLogger } from "./logger.ts";
+import type { PluginContext } from "./plugin.ts";
+import { loadPlugin } from "./plugin.ts";
 
 let versionPromise: Promise<string> | null = null;
 
 /** Read package version lazily so importing the module has no side effects. */
 function getVersion(): Promise<string> {
 	if (!versionPromise) {
-		versionPromise = fetch(new URL("../deno.json", import.meta.url))
-			.then((r) => r.json())
-			.then((j) => j.version as string)
+		// The package root's manifest: one level above `src/` in a checkout and
+		// above `dist/` in the built package.
+		versionPromise = readFile(new URL("../package.json", import.meta.url), "utf8")
+			.then((json) => JSON.parse(json).version as string)
 			.catch(() => "unknown");
 	}
 	return versionPromise;
@@ -108,16 +111,23 @@ const DEFAULT_OPTIONS: Required<
 
 /** Static server instance returned by {@linkcode createServer}. */
 export interface StaticServer {
-	/** Request handler suitable for use with `Deno.serve` or as middleware. */
+	/**
+	 * Web-standard request handler (`Request` in, `Response` out): mount it in
+	 * any server that speaks that shape, or use it as middleware.
+	 */
 	handler: (req: Request) => Promise<Response>;
-	/** Start listening on the configured port. */
-	start: () => ReturnType<typeof Deno.serve>;
+	/**
+	 * Start listening on the configured port (`0` picks a free one). Resolves
+	 * once the server is bound, with a handle carrying the real `port` and a
+	 * graceful `shutdown()`. Rejects when the port cannot be bound.
+	 */
+	start: () => Promise<ServeHandle>;
 	/** Resolved package version. */
 	version: string;
 }
 
 // Re-export for convenience
-export type { CdnAdapter, CdnOptions, Logger, PluginContext, ProjectConfig };
+export type { CdnAdapter, CdnOptions, Logger, PluginContext, ProjectConfig, ServeHandle };
 export { clearConfigCache };
 
 function resolveLogger(opt: StaticServerOptions["logger"]): Logger {
@@ -136,21 +146,22 @@ async function sweepTmpFiles(
 	const cutoff = Date.now() - maxAgeMs;
 	async function walk(dir: string) {
 		try {
-			for await (const entry of Deno.readDir(dir)) {
+			for await (const entry of await opendir(dir)) {
 				const full = `${dir}/${entry.name}`;
-				if (entry.isDirectory) {
+				if (entry.isDirectory()) {
 					await walk(full);
 				} else if (
-					entry.isFile &&
+					entry.isFile() &&
 					// Exact crypto.randomUUID() shape — a looser pattern would
 					// also match stored user files like "backup.tmp_2026-07-14".
-					/\.tmp_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-						.test(entry.name)
+					/\.tmp_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+						entry.name,
+					)
 				) {
 					try {
-						const stat = await Deno.stat(full);
-						if (stat.mtime && stat.mtime.getTime() < cutoff) {
-							await Deno.remove(full);
+						const info = await stat(full);
+						if (info.mtimeMs < cutoff) {
+							await unlink(full);
 							logger.info("tmp.swept", { path: full });
 						}
 					} catch {
@@ -181,9 +192,8 @@ export async function createServer(
 	const absStaticDir = resolve(options.staticDir);
 	// `0` (and negatives) mean "disabled" — normalize to undefined once here.
 	const maxUploadSize = options.maxUploadSize > 0 ? options.maxUploadSize : undefined;
-	const uploadIdleTimeoutMs = options.uploadIdleTimeoutMs > 0
-		? options.uploadIdleTimeoutMs
-		: undefined;
+	const uploadIdleTimeoutMs =
+		options.uploadIdleTimeoutMs > 0 ? options.uploadIdleTimeoutMs : undefined;
 
 	// Startup tmp sweep (non-blocking for request handling).
 	queueMicrotask(() => {
@@ -197,10 +207,7 @@ export async function createServer(
 		const pathname = url.pathname;
 
 		// GET|HEAD / — version signature only
-		if (
-			pathname === "/" &&
-			(req.method === "GET" || req.method === "HEAD")
-		) {
+		if (pathname === "/" && (req.method === "GET" || req.method === "HEAD")) {
 			let res = Response.json({ version: VERSION });
 			if (cdnAdapter) res = noStoreHeaders(res);
 			if (req.method === "HEAD") {
@@ -239,10 +246,7 @@ export async function createServer(
 		// Load project config (404 if not found, 500 if invalid)
 		let config: ProjectConfig;
 		try {
-			const loaded = await loadProjectConfig(
-				options.configDir,
-				projectId,
-			);
+			const loaded = await loadProjectConfig(options.configDir, projectId);
 			if (!loaded) {
 				return new Response("Not found", { status: 404 });
 			}
@@ -276,10 +280,7 @@ export async function createServer(
 		// Plugin support: if configured, let plugin handle first
 		if (config.plugin) {
 			try {
-				const pluginHandler = await loadPlugin(
-					options.configDir,
-					config.plugin,
-				);
+				const pluginHandler = await loadPlugin(options.configDir, config.plugin);
 				const ctx: PluginContext = {
 					projectId,
 					config,
@@ -303,8 +304,8 @@ export async function createServer(
 
 	// Last-resort guard: an uncaught throw anywhere above must never become an
 	// opaque, unlogged 500 (or crash an embedder that mounts `handler` without
-	// its own error handling). The body is byte-identical to Deno.serve's
-	// default so nothing downstream changes.
+	// its own error handling). The body is the plain-text default every server
+	// answers with, so nothing downstream changes.
 	async function handler(req: Request): Promise<Response> {
 		try {
 			return await handleRequest(req);
@@ -323,8 +324,26 @@ export async function createServer(
 	return {
 		handler,
 		version: VERSION,
-		start() {
-			console.log(`Listening on :${options.port}`);
+		async start() {
+			const server = await serve(handler, {
+				port: options.port,
+				// No WebSocket routes here: skip the adapter's optional `ws` lookup.
+				webSockets: false,
+				// The banner below reports the listen address.
+				onListen: () => {},
+				// Belt-and-braces: `handler` catches its own errors; this catches
+				// anything outside it that would otherwise be an unlogged 500.
+				onError: (err) => {
+					logger.error("request.unhandled", {
+						error: err instanceof Error ? err.message : String(err),
+						name: err instanceof Error ? err.name : undefined,
+						stack: err instanceof Error ? err.stack : undefined,
+					});
+					return new Response("Internal Server Error", { status: 500 });
+				},
+			});
+			// The bound port, which differs from the option when that is `0`.
+			console.log(`Listening on :${server.port}`);
 			console.log(`  Config : ${options.configDir}`);
 			console.log(`  Static : ${options.staticDir}`);
 			if (cdnAdapter) {
@@ -341,20 +360,7 @@ export async function createServer(
 			console.log(`    HEAD   /:projectId/* file info`);
 			console.log(`    PUT    /:projectId/* upload file (raw body)`);
 			console.log(`    DELETE /:projectId/* delete file`);
-			return Deno.serve({
-				port: options.port,
-				// Belt-and-braces: `handler` catches its own errors; this
-				// catches anything outside it (e.g. response-stream failures)
-				// that Deno would otherwise swallow into an unlogged 500.
-				onError: (err) => {
-					logger.error("request.unhandled", {
-						error: err instanceof Error ? err.message : String(err),
-						name: err instanceof Error ? err.name : undefined,
-						stack: err instanceof Error ? err.stack : undefined,
-					});
-					return new Response("Internal Server Error", { status: 500 });
-				},
-			}, handler);
+			return server;
 		},
 	};
 }

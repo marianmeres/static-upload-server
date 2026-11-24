@@ -19,13 +19,9 @@ export const silentLogger: Logger = {
 	error: () => {},
 };
 
-/** Simple JSON-line logger writing to Deno stderr. */
+/** Simple JSON-line logger writing to stderr. */
 export function defaultLogger(): Logger {
-	function write(
-		level: string,
-		event: string,
-		data?: Record<string, unknown>,
-	) {
+	function write(level: string, event: string, data?: Record<string, unknown>) {
 		const line = JSON.stringify({
 			ts: new Date().toISOString(),
 			level,

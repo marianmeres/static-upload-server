@@ -1,27 +1,45 @@
-import { join } from "@std/path";
-import { clearConfigCache, createServer } from "../src/server.ts";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { StaticServerOptions } from "../src/server.ts";
+import { clearConfigCache, createServer } from "../src/server.ts";
 
 export const BASE = "http://localhost";
+
+/** A fresh, empty directory under the OS temp dir. */
+export function makeTempDir(): Promise<string> {
+	return mkdtemp(join(tmpdir(), "static-upload-server-test-"));
+}
+
+/** A file's content as UTF-8 text. */
+export function readTextFile(path: string): Promise<string> {
+	return readFile(path, "utf8");
+}
+
+/**
+ * A response's JSON body. Typed `any` on purpose (the tests assert on its
+ * shape), where `Response.json()` is `unknown` under Node's types.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: see above
+export async function jsonOf(res: Response): Promise<any> {
+	return await res.json();
+}
 
 /** Create a temp dir pair (staticDir + configDir) and a project config file. */
 export async function setup(
 	projectId: string,
 	config: Record<string, unknown> = { uploadTokens: [] },
 ) {
-	const staticDir = await Deno.makeTempDir();
-	const configDir = await Deno.makeTempDir();
-	await Deno.writeTextFile(
-		join(configDir, `${projectId}.json`),
-		JSON.stringify(config),
-	);
+	const staticDir = await makeTempDir();
+	const configDir = await makeTempDir();
+	await writeFile(join(configDir, `${projectId}.json`), JSON.stringify(config));
 	clearConfigCache();
 	return { staticDir, configDir };
 }
 
 export async function cleanup(...dirs: string[]) {
 	for (const dir of dirs) {
-		await Deno.remove(dir, { recursive: true });
+		await rm(dir, { recursive: true });
 	}
 }
 
@@ -51,7 +69,7 @@ export function makeUploadRequest(
 export function makePutRequest(
 	projectId: string,
 	path: string,
-	body: BodyInit | null,
+	body: RequestInit["body"],
 	opts: { token?: string; headers?: Record<string, string> } = {},
 ): Request {
 	const headers: Record<string, string> = { ...opts.headers };
@@ -60,6 +78,8 @@ export function makePutRequest(
 		method: "PUT",
 		body,
 		headers,
+		// required by Node for a streamed body, ignored for any other
+		duplex: "half",
 	});
 }
 
