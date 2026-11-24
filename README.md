@@ -281,8 +281,30 @@ passes and the image itself has started and reported its version.
 
 ### Deploying on a host
 
-In a clone of this repository on the host, with a `.env` beside `docker-compose.yml`
-(see [.env.example](.env.example)):
+A deployment is a clone of this repository with a `.env` beside `docker-compose.yml`:
+the instance's settings (see [.env.example](.env.example)). Keep the stored files
+outside the clone and point `DATA_DIR` and `CONFIG_DIR` at them:
+
+```
+/srv/files.example.com/
+├── static-upload-server/   the clone, at the deployed tag
+│   └── .env                DATA_DIR, CONFIG_DIR (absolute paths), PUID, PGID, tokens
+├── data/                   the served files
+└── config/                 the project configs
+```
+
+The first time:
+
+```bash
+cd /srv/files.example.com
+mkdir data config         # before the first start, see "Volumes and file ownership"
+git clone https://github.com/marianmeres/static-upload-server.git
+cd static-upload-server
+cp .env.example .env      # then edit it
+bash deploy.sh
+```
+
+From then on, in the clone:
 
 ```bash
 bash deploy.sh            # the latest release
@@ -291,18 +313,27 @@ bash deploy.sh v2.1.0     # a given one; also how to roll back
 
 The script checks out the tag, pulls its image, replaces the container, waits until it
 reports healthy and checks that the server answers with the tag's version. Nothing is
-built on the host. If the pull fails, the running release keeps serving.
+built on the host. If the pull fails, the running release keeps serving. It refuses to
+run without `.env`: Compose would start the server with the defaults instead, and the
+deploy would pass its checks while serving the clone's own, empty `./data`.
 
 `deploy.sh` writes the deployed tag into `.env` as `APP_IMAGE_TAG`, so a plain
-`docker compose up -d` (after editing `.env`, say) keeps running that release.
+`docker compose up -d` (after editing `.env`, say) keeps running that release, and
+`docker compose logs -f` in the clone shows its logs.
 
-If the image package on GitHub is private, the host needs
-`docker login ghcr.io -u <github-user>` once, with a token that has `read:packages`. A
-public package needs no login.
+Compose names the project after the clone's folder. To move or rename the clone, run
+`docker compose down` in the old one first: the container name is fixed, so the new
+project cannot start while the old one runs.
+
+The image package is public, so the host needs no login. A fork whose package is private
+needs `docker login ghcr.io -u <github-user>` once on the host, with a token that has
+`read:packages`.
 
 ### Volumes and file ownership
 
-The compose file mounts `./data` for static files and `./config` for project configs.
+The compose file mounts `DATA_DIR` (default `./data`) for static files and `CONFIG_DIR`
+(default `./config`) for project configs. Create both before the first start: Docker
+creates a missing one owned by root, and the server cannot write to it.
 
 The container runs as a non-root user. Set `PUID` and `PGID` in your `.env` file to
 match your host user so that uploaded files have correct ownership:

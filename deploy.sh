@@ -8,8 +8,8 @@ set -euo pipefail
 #   bash deploy.sh v2.1.0     # a given one (also how to roll back)
 #
 # Run it on the host, in the deployed clone, as a user that can run docker. The
-# configuration is the `.env` beside docker-compose.yml, as for any `docker compose`
-# command here.
+# instance's settings are the `.env` beside docker-compose.yml, as for any
+# `docker compose` command here, and the script refuses to run without one.
 #
 # In order, stopping at the first failure:
 #   1. fetch the tags and check out the one to deploy;
@@ -45,15 +45,11 @@ image_for() {
 	APP_IMAGE_TAG="$1" docker compose config --images | head -1
 }
 
-# Set APP_IMAGE_TAG in .env (created when missing), or remove it when given "".
-# Every other line stays as it is.
+# Set APP_IMAGE_TAG in .env, or remove it when given "". Every other line stays as it is.
 write_env_tag() {
 	local tmp
-	[ -f "$ENV_FILE" ] || [ -n "$1" ] || return 0
 	tmp="$(mktemp)"
-	if [ -f "$ENV_FILE" ]; then
-		grep -Ev '^[[:space:]]*(export[[:space:]]+)?APP_IMAGE_TAG[[:space:]]*=' "$ENV_FILE" >"$tmp" || true
-	fi
+	grep -Ev '^[[:space:]]*(export[[:space:]]+)?APP_IMAGE_TAG[[:space:]]*=' "$ENV_FILE" >"$tmp" || true
 	if [ -n "$1" ]; then
 		printf 'APP_IMAGE_TAG=%s\n' "$1" >>"$tmp"
 	fi
@@ -61,6 +57,23 @@ write_env_tag() {
 	cat "$tmp" >"$ENV_FILE"
 	rm -f "$tmp"
 }
+
+# ---- 0. the instance's settings ---------------------------------------------
+
+# Without .env, every compose command here falls back to the defaults, and a deploy
+# passes both of its checks while serving this clone's own, empty ./data.
+if [ ! -f "$ENV_FILE" ]; then
+	cat <<EOF
+Error: no $ENV_FILE beside docker-compose.yml (in $PWD).
+Nothing was done.
+
+It holds this instance's settings: DATA_DIR, CONFIG_DIR, PUID, PGID and the tokens.
+Without it the server would start with the defaults: this clone's ./data and ./config,
+as user 1000, with no global token. Create it from .env.example, or move it here from
+wherever the instance kept it (see "Deploying on a host" in README.md).
+EOF
+	exit 1
+fi
 
 # ---- 1. the tag -------------------------------------------------------------
 
